@@ -47,8 +47,8 @@ for p_out in c_outer:
 # csv exporting
 df = pd.DataFrame(baseline_world, columns=["x", "y", "w_left", "w_right"])
 df = df.drop_duplicates(subset=["x", "y"]).iloc[::4, :].reset_index(drop=True)
-df.to_csv(f"{map_name}.csv", index=False)
-print(f"Success: Exported {len(df)} points to {map_name}.csv")
+df.to_csv(f"{cwd}/src/mppi/resources/{map_name}.csv", index=False)
+print(f"Success: Exported {len(df)} points to {cwd}/src/mppi/resources/{map_name}.csv")
 
 # visualization
 viz = im.copy()
@@ -58,7 +58,7 @@ pts = np.array(baseline_pixels, np.int32).reshape((-1, 1, 2))
 cv2.polylines(viz, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
 for i, pt in enumerate(baseline_pixels):
     if i % 20 == 0:
-        cv2.circle(viz, tuple(pt), 3, (0, 255, 255), -1) # highlight baseline pixels
+        cv2.circle(viz, tuple(pt), 3, (0, 255, 255), -1)  # highlight baseline pixels
 
 cv2.imshow("Green=Outer, Blue=Inner, Red=Baseline Path", viz)
 cv2.waitKey(0)
