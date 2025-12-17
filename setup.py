@@ -25,7 +25,7 @@ setup(
     entry_points={
         "console_scripts": [
             "mppi_controller = mppi.mppi_controller:main",
-            "local_planner = mppi.local_planner:main",
+            "global_planner = mppi.path_planner:main",
         ],
     },
 )
