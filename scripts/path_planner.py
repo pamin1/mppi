@@ -1,76 +1,158 @@
 #!/usr/bin/env python3
 import os
+import pandas as pd
 import rclpy
 from rclpy.node import Node
 import pandas as pd
 import numpy as np
 from autoware_auto_planning_msgs.msg import Trajectory, TrajectoryPoint
-from geometry_msgs.msg import Pose, PoseStamped
-from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped, TransformStamped
+from nav_msgs.msg import Path, Odometry, OccupancyGrid
+from tf2_ros import TransformListener, Buffer
+from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
 import tf_transformations
+from ament_index_python.packages import get_package_share_directory
 
 
 class GlobalTrajectoryPublisher(Node):
     def __init__(self):
         super().__init__("global_trajectory_publisher")
 
-        # traj and visualization pubs
-        self.trajectory_pub = self.create_publisher(Trajectory, "/planner_traj", 10)
-        self.viz_pub = self.create_publisher(Path, '/visual_raceline', 10)
-        
+        self.map_frame = "map"
+        self.map = None
+        self.odom = None
+        self.lookahead = 75
+
         # load path
-        self.csv_path = f"{os.getcwd()}/src/mppi/resources/Spielberg_map_optimized.csv"
-        self.load_and_publish()
+        share_dir = get_package_share_directory("mppi")
+        file = os.path.join(share_dir, "resources/Spielberg_map_optimized.csv")
+        df = pd.read_csv(file)
+        self.x = df["x"].to_numpy()
+        self.y = df["y"].to_numpy()
+        self.speed = df["vx"].to_numpy()
+        self.yaw = df["yaw"].to_numpy()
+        self.kappa = df["kappa"].to_numpy()
+        self.N = df.shape[0]
+        self.get_logger().info(f"Got {self.N} points")
 
-    def load_and_publish(self):
-        try:
-            df = pd.read_csv(self.csv_path)
-            self.get_logger().info(f"Loaded {len(df)} points from {self.csv_path}")
-        except Exception as e:
-            self.get_logger().error(f"Failed to load CSV: {e}")
+        # publishers
+        self.trajectory_pub = self.create_publisher(Trajectory, "/planner_traj", 10)
+        self.viz_pub = self.create_publisher(Path, "/visual_raceline", 10)
+
+        # subscribers
+        self.odom_sub = self.create_subscription(
+            Odometry,
+            "/ego_racecar/odom",  # Adjust topic name if needed
+            self.odom_callback,
+            10,
+        )
+
+        self.map_sub = self.create_subscription(
+            OccupancyGrid, "/map", self.map_callback, 1
+        )
+
+        # TF buffer and listener
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        # Timer to periodically publish path
+        self.timer = self.create_timer(0.1, self.update_traj)
+
+    def odom_callback(self, msg):
+        self.odom = msg
+
+    def map_callback(self, msg):
+        self.map = msg
+
+    def update_traj(self):
+        if self.odom is None:
+            self.get_logger().info("Odometry is not ready")
             return
+        try:
+            now = self.get_clock().now()
+            trans: TransformStamped = self.tf_buffer.lookup_transform(
+                self.map_frame, "ego_racecar/base_link", rclpy.time.Time()
+            )
 
-        msg = Trajectory()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "map"
+            x = trans.transform.translation.x
+            y = trans.transform.translation.y
 
-        for _, row in df.iterrows():
-            point = TrajectoryPoint()
+            q = trans.transform.rotation
+            _, _, yaw = tf_transformations.euler_from_quaternion([q.x, q.y, q.z, q.w])
 
-            point.pose.position.x = float(row["x"])
-            point.pose.position.y = float(row["y"])
+            speed = self.odom.twist.twist.linear.x
 
-            q = tf_transformations.quaternion_from_euler(0, 0, row["yaw"])
-            point.pose.orientation.x = q[0]
-            point.pose.orientation.y = q[1]
-            point.pose.orientation.z = q[2]
-            point.pose.orientation.w = q[3]
+            dx = self.x - x
+            dy = self.y - y
 
-            point.longitudinal_velocity_mps = float(row["vx"])
+            dist_sq = dx**2 + dy**2
+            # min_idx = (np.argmin(dist_sq) + self.N - 25) % self.N
+            min_idx = np.argmin(dist_sq)
 
-            # if these get added to the path optimization later on
-            if "acceleration" in row:
-                point.acceleration_mps2 = float(row["acceleration"])
-            if "kappa" in row:
-                point.front_wheel_angle_rad = np.arctan(0.33 * row["kappa"])
+            if (
+                min_idx + self.lookahead > self.N
+            ):  # traj points need to mod the size of the arrays
+                remain = min_idx + self.lookahead - self.N + 1
+                xx = np.hstack([self.x[min_idx:-1]], self.x[:remain])
+                yy = np.hstack([self.y[min_idx:-1]], self.y[:remain])
+                vv = np.hstack([self.speed[min_idx:-1]], self.speed[:remain])
+                hh = np.hstack([self.yaw[min_idx:-1]], self.yaw[:remain])
 
-            msg.points.append(point)
+                kk = np.hstack([self.kappa[min_idx:-1]], self.kappa[:remain])
+            else:
+                xx = self.x[min_idx : min_idx + self.lookahead]
+                yy = self.y[min_idx : min_idx + self.lookahead]
+                vv = self.speed[min_idx : min_idx + self.lookahead]
+                hh = self.yaw[min_idx : min_idx + self.lookahead]
+                kk = self.kappa[min_idx : min_idx + self.lookahead]
 
-        self.trajectory_pub.publish(msg)
-        self.get_logger().info("Global trajectory published.")
+            traj_msg = Trajectory()
+            traj_msg.header.stamp = self.get_clock().now().to_msg()
+            traj_msg.header.frame_id = self.map_frame
 
-        viz_msg = Path()
-        viz_msg.header.frame_id = "map"
-        viz_msg.header.stamp = self.get_clock().now().to_msg()
+            path_msg = Path()
+            path_msg.header.frame_id = self.map_frame
+            path_msg.header.stamp = self.get_clock().now().to_msg()
 
-        for _, row in df.iterrows():
-            pose = PoseStamped()
-            pose.header = viz_msg.header
-            pose.pose.position.x = float(row["x"])
-            pose.pose.position.y = float(row["y"])
-            viz_msg.poses.append(pose)
+            for i in range(self.lookahead):
+                point = TrajectoryPoint()
+                point.pose.position.x = xx[i]
+                point.pose.position.y = yy[i]
 
-        self.viz_pub.publish(viz_msg)
+                # 1. Correct Heading (Yaw)
+                qx, qy, qz, qw = tf_transformations.quaternion_from_euler(0, 0, hh[i])
+                point.pose.orientation.x = qx
+                point.pose.orientation.y = qy
+                point.pose.orientation.z = qz
+                point.pose.orientation.w = qw
+
+                # 2. Correct Speed and Yaw Rate
+                point.longitudinal_velocity_mps = vv[i]
+                point.heading_rate_rps = vv[i] * kk[i]
+
+                # 3. Handle Steering (Front Wheel Angle)
+                # If you don't have optimal steering in your CSV, set it to 0.0
+                # and let MPPI calculate the effort, or estimate it via L * kappa
+                L = 0.33  # wheel base
+
+                max_steering = np.deg2rad(30.0)  # F1TENTH typical limit
+                steering = np.clip(np.arctan(L * kk[i]), -max_steering, max_steering)
+                point.front_wheel_angle_rad = steering
+
+                traj_msg.points.append(point)
+
+                pose = PoseStamped()
+                pose.header = path_msg.header
+                pose.pose.position.x = xx[i]
+                pose.pose.position.y = yy[i]
+                pose.pose.position.z = 0.0
+                pose.pose.orientation.w = 0.0
+                path_msg.poses.append(pose)
+
+            self.trajectory_pub.publish(traj_msg)
+            self.viz_pub.publish(path_msg)
+        except (LookupException, ConnectivityException, ExtrapolationException) as e:
+            self.get_logger().warn(f"Failed to get transform: {e}")
 
 
 def main(args=None):
