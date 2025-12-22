@@ -104,8 +104,15 @@ void MPPI_Controller::updateControl()
     // should perform another mppi implementation
 
     // get the initial control sequence -- warm starting
-
+    if (!controlSeqInitialized)
+    {
+        nominalControlSequence.resize(horizon);
+        for (auto &u : nominalControlSequence)
+        {
+            u.acceleration = 0.0;
+            u.steering = 0.0;
+        }
+        controlSeqInitialized = true;
+    }
     // sample the system dynamics (updateState?)
-
-
 }
