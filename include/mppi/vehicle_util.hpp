@@ -1,3 +1,6 @@
+#include <cmath>
+#include <eigen3/Eigen/Eigen>
+
 // parameterize vehicle state
 struct VehicleParams
 {
@@ -21,6 +24,11 @@ struct VehicleParams
     }
 };
 
+struct ControlInput
+{
+    double acceleration, steering; // integrate during publishing to command velocity and steering
+};
+
 // 3 DoF planar model: [x,y,heading]
 // Dynamic Bicycle Model: [x,y,heading,vx,vy,yawRate]
 struct VehicleState
@@ -29,4 +37,41 @@ struct VehicleState
     double heading;
     double vx, vy;
     double yawRate;
+
+    VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt);
 };
+
+VehicleState VehicleState::stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)
+{
+    VehicleState nextState = state;
+    
+    double vx_safe = (std::abs(state.vx) < 0.1) ? 0.1 : state.vx;
+
+    // compute derivatives
+    // pose derivatives
+    double x_dot = vx_safe * std::cos(state.heading) - state.vy * std::sin(state.heading);
+    double y_dot = vx_safe * std::sin(state.heading) + state.vy * std::cos(state.heading);
+    double heading_dot = state.yawRate;
+
+    // speed derivatives
+    double vx_dot = control.acceleration + state.vy * state.yawRate;
+
+    double vy_dot = -(params.csf + params.csr) / (params.mass * vx_safe) * state.vy;
+    vy_dot += (params.csr * params.lr - params.csf * params.lf) / (params.mass * vx_safe) * state.yawRate;
+    vy_dot -= vx_safe * state.yawRate;
+    vy_dot += params.csf / params.mass * control.steering;
+
+    double yawRate_dot = state.vy * (params.csr * params.lr - params.csf * params.lf) / (params.iz * vx_safe);
+    yawRate_dot += state.yawRate * (params.csr * params.lr * params.lr - params.csf * params.lf * params.lf) / (params.iz * vx_safe);
+    yawRate_dot += control.steering * params.lf * params.csf / params.iz;
+
+    // compute integration - euler for now
+    nextState.x += x_dot * dt;
+    nextState.y += y_dot * dt;
+    nextState.heading += heading_dot * dt;
+    nextState.vx += vx_dot * dt;
+    nextState.vy += vy_dot * dt;
+    nextState.yawRate += yawRate_dot * dt;
+
+    return nextState;
+}
