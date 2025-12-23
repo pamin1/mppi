@@ -12,9 +12,44 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(ackermann_msgs REQUIRED)
+find_package(autoware_auto_planning_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 # Install Python modules
 ament_python_install_package(${PROJECT_NAME})
+
+add_executable(mppi_controller_node 
+  src/mppi_cuda.cpp
+)
+
+# Link dependencies:
+ament_target_dependencies(mppi_controller_node
+  rclcpp
+  nav_msgs
+  sensor_msgs
+  geometry_msgs
+  ackermann_msgs
+  autoware_auto_planning_msgs
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+# Install executable:
+install(TARGETS mppi_controller_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# Install headers:
+install(DIRECTORY include/
+  DESTINATION include/
+)
+
+target_include_directories(mppi_controller_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 
 install(PROGRAMS
   scripts/mppi_controller.py

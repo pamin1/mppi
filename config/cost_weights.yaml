@@ -1,4 +1,4 @@
-mppi_controller:
+/mppi_controller_node:
   ros__parameters:
     mppi:
       samples: 10000
