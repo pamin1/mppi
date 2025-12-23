@@ -1,5 +1,4 @@
 #include <cmath>
-#include <eigen3/Eigen/Eigen>
 
 // parameterize vehicle state
 struct VehicleParams
@@ -37,11 +36,9 @@ struct VehicleState
     double heading;
     double vx, vy;
     double yawRate;
-
-    VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt);
 };
 
-VehicleState VehicleState::stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)
+VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)
 {
     VehicleState nextState = state;
     
