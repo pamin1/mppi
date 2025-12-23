@@ -72,9 +72,9 @@ void MPPI_Controller::loadParameters()
     weights.rSteering = this->get_parameter("cost_weights.r_steering").as_double();
 
     RCLCPP_INFO(this->get_logger(), "MPPI Parameters:");
-    RCLCPP_INFO(this->get_logger(), "\tSamples:\t\t%d", samples);
-    RCLCPP_INFO(this->get_logger(), "\tFrequency:\t\t%d Hz", controlFrequency);
-    RCLCPP_INFO(this->get_logger(), "\tHorizon:\t\t%d steps", horizon);
+    RCLCPP_INFO(this->get_logger(), "\tSamples:\t%d", samples);
+    RCLCPP_INFO(this->get_logger(), "\tFrequency:\t%d Hz", controlFrequency);
+    RCLCPP_INFO(this->get_logger(), "\tHorizon:\t%d steps", horizon);
     RCLCPP_INFO(this->get_logger(), "\tTemperature:\t%.3f", temperature);
 }
 
@@ -115,4 +115,13 @@ void MPPI_Controller::updateControl()
         controlSeqInitialized = true;
     }
     // sample the system dynamics (updateState?)
+}
+
+int main(int argc, char **argv)
+{
+    rclcpp::init(argc, argv);
+    rclcpp::spin(std::make_shared<MPPI_Controller>());
+    rclcpp::shutdown();
+
+    return 0;
 }

@@ -9,11 +9,6 @@
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
 
-struct ControlInput
-{
-    double acceleration, steering; // integrate during publishing to command velocity and steering
-};
-
 struct CostWeights
 {
     double qX, qY, qHeading;
