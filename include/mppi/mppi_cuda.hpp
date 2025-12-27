@@ -23,6 +23,7 @@ class MPPI_Controller : public rclcpp::Node
 
     void loadParameters();
     void updateState(const nav_msgs::msg::Odometry::SharedPtr odom);
+    std::vector<VehicleState> parseTrajectory(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj);
 
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void trajectoryCallback(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr msg);

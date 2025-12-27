@@ -1,7 +1,5 @@
 #include <mppi/mppi_cuda.hpp>
 
-// eigen for the matrix/vector math?
-
 // make an include file for the vehicle dynamics and the function stepping
 
 MPPI_Controller::MPPI_Controller()
@@ -99,9 +97,54 @@ void MPPI_Controller::updateState(const nav_msgs::msg::Odometry::SharedPtr odom)
     state.yawRate = odom->twist.twist.angular.z;
 }
 
+std::vector<VehicleState> MPPI_Controller::parseTrajectory(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj)
+{
+    // returns a vector of the trajectory points
+    std::vector<VehicleState> parsedTraj;
+    for (auto &point : traj->points)
+    {
+        VehicleState currState;
+
+        // vehicle state and trajectory should be in same map frame -- no tranform required
+        state.x = point.pose.position.x;
+        state.y = point.pose.position.y;
+
+        tf2::Quaternion quat;
+        tf2::fromMsg(point.pose.orientation, quat);
+        tf2::Matrix3x3 m(quat);
+        double roll, pitch, yaw;
+        m.getRPY(roll, pitch, yaw);
+        state.heading = yaw;
+
+        state.vx = point.longitudinal_velocity_mps;
+        state.vy = 0.0; // assume no slipping from path planner
+        state.yawRate = point.heading_rate_rps;
+
+        parsedTraj.push_back(state);
+    }
+    return parsedTraj;
+}
+
 void MPPI_Controller::updateControl()
 {
-    // should perform another mppi implementation
+    // safety check for data available
+    if (!odom || !traj)
+    {
+        RCLCPP_INFO(this->get_logger(), "Waiting for odometry or trajectory");
+    }
+
+    // update the state
+    try
+    {
+        updateState(odom);
+    }
+    catch (...)
+    {
+        RCLCPP_ERROR(this->get_logger(), "Caught error attempting to update vehicle state");
+    }
+
+    // convert the trajectory
+    std::vector<VehicleState> trajectory = parseTrajectory(traj);
 
     // get the initial control sequence -- warm starting
     if (!controlSeqInitialized)
@@ -114,7 +157,6 @@ void MPPI_Controller::updateControl()
         }
         controlSeqInitialized = true;
     }
-    // sample the system dynamics (updateState?)
 }
 
 int main(int argc, char **argv)
