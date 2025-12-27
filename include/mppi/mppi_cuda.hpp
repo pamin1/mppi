@@ -8,6 +8,7 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
+#include <random>
 
 struct CostWeights
 {
@@ -50,6 +51,11 @@ class MPPI_Controller : public rclcpp::Node
     VehicleParams params;
     VehicleState state;
     CostWeights weights;
+
+    // random distribution setup
+    std::mt19937 rng;
+    std::normal_distribution<double> accelNoise;
+    std::normal_distribution<double> steerNoise;
 
     // transforms
     std::shared_ptr<tf2_ros::Buffer> tfBuffer;

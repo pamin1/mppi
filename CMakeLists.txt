@@ -1,9 +1,16 @@
 cmake_minimum_required(VERSION 3.8)
-project(mppi)
+project(mppi LANGUAGES CXX CUDA)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
+
+# CUDA setup
+find_package(CUDA REQUIRED)
+enable_language(CUDA)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_ARCHITECTURES 75)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
@@ -16,15 +23,33 @@ find_package(nav_msgs REQUIRED)
 find_package(ackermann_msgs REQUIRED)
 find_package(autoware_auto_planning_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 # Install Python modules
 ament_python_install_package(${PROJECT_NAME})
 
+# CUDA executable with .cu files
 add_executable(mppi_controller_node 
   src/mppi_cuda.cpp
+  src/mppi_kernel.cu
 )
 
-# Link dependencies:
+# Set CUDA flags
+target_compile_options(mppi_controller_node PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:
+    --use_fast_math
+  >
+)
+
+# Include directories
+target_include_directories(mppi_controller_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${CUDA_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+
+# Link dependencies
 ament_target_dependencies(mppi_controller_node
   rclcpp
   nav_msgs
@@ -36,19 +61,21 @@ ament_target_dependencies(mppi_controller_node
   tf2_geometry_msgs
 )
 
-# Install executable:
+# Link CUDA libraries
+target_link_libraries(mppi_controller_node
+  ${CUDA_LIBRARIES}
+  cudart
+  curand
+)
+
+# Install executable
 install(TARGETS mppi_controller_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# Install headers:
+# Install headers
 install(DIRECTORY include/
   DESTINATION include/
-)
-
-target_include_directories(mppi_controller_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
 )
 
 install(PROGRAMS
@@ -63,12 +90,7 @@ install(DIRECTORY resources DESTINATION share/${PROJECT_NAME}/)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()

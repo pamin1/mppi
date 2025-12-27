@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cuda_runtime.h>
 
 // parameterize vehicle state
 struct VehicleParams
@@ -38,10 +39,10 @@ struct VehicleState
     double yawRate;
 };
 
-VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)
+__device__ VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)
 {
     VehicleState nextState = state;
-    
+
     double vx_safe = (std::abs(state.vx) < 0.1) ? 0.1 : state.vx;
 
     // compute derivatives
