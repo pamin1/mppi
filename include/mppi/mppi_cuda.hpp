@@ -1,21 +1,15 @@
 #include <ackermann_msgs/msg/ackermann_drive_stamped.hpp>
 #include <autoware_auto_planning_msgs/msg/trajectory.hpp>
 #include <chrono>
+#include <mppi/mppi_kernel.cuh>
 #include <mppi/vehicle_util.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <random>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
-#include <random>
-
-struct CostWeights
-{
-    double qX, qY, qHeading;
-    double qVx, qVy, qYawRate;
-    double rAccel, rSteering;
-};
 
 class MPPI_Controller : public rclcpp::Node
 {

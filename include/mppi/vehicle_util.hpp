@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cmath>
 #include <cuda_runtime.h>
 
@@ -39,16 +41,25 @@ struct VehicleState
     double yawRate;
 };
 
-__device__ VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)
+struct CostWeights
+{
+    double qX, qY;
+    double qHeading;
+    double qVx, qVy;
+    double qYawRate;
+    double rAccel, rSteering;
+};
+
+__device__ inline VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)
 {
     VehicleState nextState = state;
 
-    double vx_safe = (std::abs(state.vx) < 0.1) ? 0.1 : state.vx;
+    double vx_safe = (fabs(state.vx) < 0.1) ? 0.1 : state.vx;
 
     // compute derivatives
     // pose derivatives
-    double x_dot = vx_safe * std::cos(state.heading) - state.vy * std::sin(state.heading);
-    double y_dot = vx_safe * std::sin(state.heading) + state.vy * std::cos(state.heading);
+    double x_dot = vx_safe * cos(state.heading) - state.vy * sin(state.heading);
+    double y_dot = vx_safe * sin(state.heading) + state.vy * cos(state.heading);
     double heading_dot = state.yawRate;
 
     // speed derivatives
