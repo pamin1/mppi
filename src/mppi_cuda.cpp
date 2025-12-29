@@ -12,6 +12,10 @@ MPPI_Controller::MPPI_Controller()
     this->declare_parameter("mppi.temperature", 1.0);
     this->declare_parameter("mppi.alpha", 0.1);
 
+    // distribution tuning
+    this->declare_parameter("mppi.accel_dist", 2.0);
+    this->declare_parameter("mppi.steer_dist", 0.3);
+
     // state tracking weights
     this->declare_parameter("cost_weights.q_x", 1.0);
     this->declare_parameter("cost_weights.q_y", 1.0);
@@ -60,6 +64,9 @@ void MPPI_Controller::loadParameters()
     temperature = this->get_parameter("mppi.temperature").as_double();
     alpha = this->get_parameter("mppi.alpha").as_double();
 
+    accelNoise = std::normal_distribution<double>(0.0, this->get_parameter("mppi.accel_dist").as_double());
+    accelNoise = std::normal_distribution<double>(0.0, this->get_parameter("mppi.steer_dist").as_double());
+
     weights.qX = this->get_parameter("cost_weights.q_x").as_double();
     weights.qY = this->get_parameter("cost_weights.q_y").as_double();
     weights.qHeading = this->get_parameter("cost_weights.q_heading").as_double();
@@ -106,21 +113,21 @@ std::vector<VehicleState> MPPI_Controller::parseTrajectory(const autoware_auto_p
         VehicleState currState;
 
         // vehicle state and trajectory should be in same map frame -- no tranform required
-        state.x = point.pose.position.x;
-        state.y = point.pose.position.y;
+        currState.x = point.pose.position.x;
+        currState.y = point.pose.position.y;
 
         tf2::Quaternion quat;
         tf2::fromMsg(point.pose.orientation, quat);
         tf2::Matrix3x3 m(quat);
         double roll, pitch, yaw;
         m.getRPY(roll, pitch, yaw);
-        state.heading = yaw;
+        currState.heading = yaw;
 
-        state.vx = point.longitudinal_velocity_mps;
-        state.vy = 0.0; // assume no slipping from path planner
-        state.yawRate = point.heading_rate_rps;
+        currState.vx = point.longitudinal_velocity_mps;
+        currState.vy = 0.0; // assume no slipping from path planner
+        currState.yawRate = point.heading_rate_rps;
 
-        parsedTraj.push_back(state);
+        parsedTraj.push_back(currState);
     }
     return parsedTraj;
 }
@@ -131,6 +138,7 @@ void MPPI_Controller::updateControl()
     if (!odom || !traj)
     {
         RCLCPP_INFO(this->get_logger(), "Waiting for odometry or trajectory");
+        return;
     }
 
     // update the state
@@ -157,6 +165,9 @@ void MPPI_Controller::updateControl()
         }
         controlSeqInitialized = true;
     }
+
+    // need to perform the mppi function here
+    
 }
 
 int main(int argc, char **argv)

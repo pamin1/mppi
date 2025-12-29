@@ -37,7 +37,9 @@ add_executable(mppi_controller_node
 # Set CUDA flags
 target_compile_options(mppi_controller_node PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:
+    --expt-relaxed-constexpr
     --use_fast_math
+    -Wno-pedantic
   >
 )
 
