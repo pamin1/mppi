@@ -45,6 +45,22 @@ MPPI_Controller::MPPI_Controller()
     RCLCPP_INFO(this->get_logger(), "MPPI Controller initialized successfully");
 }
 
+MPPI_Controller::~MPPI_Controller()
+{
+    RCLCPP_INFO(this->get_logger(), "Shutting down MPPI Controller...");
+
+    cudaFree(d_nominalControls);
+    cudaFree(d_refTraj);
+    cudaFree(d_currState);
+    cudaFree(d_weights);
+    cudaFree(d_params);
+    cudaFree(d_rngStates);
+    cudaFree(d_controls);
+    cudaFree(d_costs);
+
+    RCLCPP_INFO(this->get_logger(), "CUDA memory freed");
+}
+
 void MPPI_Controller::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
     odom = msg;
@@ -64,8 +80,8 @@ void MPPI_Controller::loadParameters()
     temperature = this->get_parameter("mppi.temperature").as_double();
     alpha = this->get_parameter("mppi.alpha").as_double();
 
-    accelNoise = std::normal_distribution<double>(0.0, this->get_parameter("mppi.accel_dist").as_double());
-    accelNoise = std::normal_distribution<double>(0.0, this->get_parameter("mppi.steer_dist").as_double());
+    sigmaAcceleration = this->get_parameter("mppi.accel_dist").as_double();
+    sigmaSteering = this->get_parameter("mppi.steer_dist").as_double();
 
     weights.qX = this->get_parameter("cost_weights.q_x").as_double();
     weights.qY = this->get_parameter("cost_weights.q_y").as_double();
@@ -81,6 +97,29 @@ void MPPI_Controller::loadParameters()
     RCLCPP_INFO(this->get_logger(), "\tFrequency:\t%d Hz", controlFrequency);
     RCLCPP_INFO(this->get_logger(), "\tHorizon:\t%d steps", horizon);
     RCLCPP_INFO(this->get_logger(), "\tTemperature:\t%.3f", temperature);
+
+    // set up GPU arrays
+    cudaMalloc((void **)&d_nominalControls, sizeof(ControlInput) * horizon);
+    cudaMalloc((void **)&d_refTraj, sizeof(VehicleState) * horizon);
+    cudaMalloc((void **)&d_currState, sizeof(VehicleState));
+    cudaMalloc((void **)&d_weights, sizeof(CostWeights));
+    cudaMalloc((void **)&d_params, sizeof(VehicleParams));
+    cudaMalloc((void **)&d_rngStates, sizeof(curandState) * samples);
+    cudaMalloc((void **)&d_controls, sizeof(ControlInput) * samples * horizon); // 30 * 10000 * 16B = 3MB+??
+    cudaMalloc((void **)&d_costs, sizeof(double) * samples);
+
+    // copy fixed values over
+    cudaMemcpy(d_weights, &weights, sizeof(CostWeights), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_params, &params, sizeof(VehicleParams), cudaMemcpyHostToDevice);
+
+    block = 512;
+    grid = (samples + block - 1) / block;
+
+    // launch the rng kernel
+    std::random_device rd;
+    unsigned long seed = rd();
+
+    launchSetupRNG(d_rngStates, seed, grid, block);
 }
 
 void MPPI_Controller::updateState(const nav_msgs::msg::Odometry::SharedPtr odom)
@@ -103,12 +142,10 @@ void MPPI_Controller::updateState(const nav_msgs::msg::Odometry::SharedPtr odom)
     state.vy = odom->twist.twist.linear.y;
     state.yawRate = odom->twist.twist.angular.z;
 }
-
-std::vector<VehicleState> MPPI_Controller::parseTrajectory(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj)
+void MPPI_Controller::updateTraj(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj)
 {
-    // returns a vector of the trajectory points
-    std::vector<VehicleState> parsedTraj;
-    for (auto &point : traj->points)
+    trajectory.clear();
+    for (auto &point : traj->points) // need to guarantee that we only take sample number of trajectory points
     {
         VehicleState currState;
 
@@ -127,9 +164,13 @@ std::vector<VehicleState> MPPI_Controller::parseTrajectory(const autoware_auto_p
         currState.vy = 0.0; // assume no slipping from path planner
         currState.yawRate = point.heading_rate_rps;
 
-        parsedTraj.push_back(currState);
+        trajectory.push_back(currState);
+
+        if (trajectory.size() == horizon)
+        {
+            return;
+        }
     }
-    return parsedTraj;
 }
 
 void MPPI_Controller::updateControl()
@@ -141,18 +182,16 @@ void MPPI_Controller::updateControl()
         return;
     }
 
-    // update the state
+    // update the state and strajectory
     try
     {
         updateState(odom);
+        updateTraj(traj);
     }
     catch (...)
     {
         RCLCPP_ERROR(this->get_logger(), "Caught error attempting to update vehicle state");
     }
-
-    // convert the trajectory
-    std::vector<VehicleState> trajectory = parseTrajectory(traj);
 
     // get the initial control sequence -- warm starting
     if (!controlSeqInitialized)
@@ -166,8 +205,12 @@ void MPPI_Controller::updateControl()
         controlSeqInitialized = true;
     }
 
-    // need to perform the mppi function here
-    
+    // need to update the nominal control sequence, refTraj, and currState before iterating mppi
+    cudaMemcpy(d_nominalControls, nominalControlSequence.data(), sizeof(ControlInput) * horizon, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_refTraj, trajectory.data(), sizeof(VehicleState) * horizon, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_currState, &state, sizeof(VehicleState), cudaMemcpyHostToDevice);
+
+    launchMPPIKernel(d_controls, d_costs, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates, samples, horizon, dt, sigmaAcceleration, sigmaSteering, grid, block);
 }
 
 int main(int argc, char **argv)

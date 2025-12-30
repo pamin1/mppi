@@ -1,7 +1,7 @@
 #include <ackermann_msgs/msg/ackermann_drive_stamped.hpp>
 #include <autoware_auto_planning_msgs/msg/trajectory.hpp>
 #include <chrono>
-#include <mppi/mppi_kernel.cuh>
+#include <mppi/kernel_launch.hpp>
 #include <mppi/vehicle_util.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -15,10 +15,11 @@ class MPPI_Controller : public rclcpp::Node
 {
   public:
     MPPI_Controller();
-
+    ~MPPI_Controller();
+    
     void loadParameters();
     void updateState(const nav_msgs::msg::Odometry::SharedPtr odom);
-    std::vector<VehicleState> parseTrajectory(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj);
+    void updateTraj(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj);
 
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void trajectoryCallback(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr msg);
@@ -39,17 +40,28 @@ class MPPI_Controller : public rclcpp::Node
     // MPPI givens
     bool controlSeqInitialized = false;
     std::vector<ControlInput> nominalControlSequence;
+    std::vector<VehicleState> trajectory;
     float sigmaAcceleration, sigmaSteering; // control noise for sampling
+
+    // GPU arrays
+    int block, grid;
+
+    ControlInput *d_nominalControls;
+    VehicleState *d_refTraj;
+    VehicleState *d_currState;
+
+    CostWeights *d_weights;
+    VehicleParams *d_params;
+
+    curandState *d_rngStates;
+
+    ControlInput *d_controls;
+    double *d_costs;
 
     // vehicle set up
     VehicleParams params;
     VehicleState state;
     CostWeights weights;
-
-    // random distribution setup
-    std::mt19937 rng;
-    std::normal_distribution<double> accelNoise;
-    std::normal_distribution<double> steerNoise;
 
     // transforms
     std::shared_ptr<tf2_ros::Buffer> tfBuffer;
