@@ -1,5 +1,8 @@
+#include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
 #include <curand_kernel.h>
+#include <device_launch_parameters.h>
+#include <mppi/kernel_launch.hpp>
 #include <mppi/vehicle_util.hpp>
 
 __device__ inline float clamp(float value, float min_val, float max_val)
@@ -63,4 +66,4 @@ __device__ double computeCost(const VehicleState &predicted, const VehicleState 
  * @param sigmaAccel Standard Deviation for acceleration
  * @param sigmaSteering Standard Deviation for steering
  */
-__global__ void mppiKernel(ControlInput *controlSamples, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering, float minAccel, float maxAccel, float minSteer, float maxSteer);
+__global__ void mppiKernel(ControlInput *controlSamples, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering);
