@@ -25,16 +25,12 @@ __device__ inline double angleDiff(double a, double b)
  * @param states Storage of device RNG seeds
  * @param seed Device seed
  */
-__global__ void setupRNG(curandState *states, unsigned long seed)
-{
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    curand_init(seed, idx, 0, &states[idx]);
-}
+__global__ void setupRNG(curandState *states, unsigned long seed);
 
 /**
  * @brief Computes cost as error between current/predicted state and the reference state from optimized trajectory
  */
-__device__ double computeCost(const VehicleState &predicted, const VehicleState &reference, const ControlInput &control, const CostWeights &weights)
+__device__ __forceinline__ double computeCost(const VehicleState &predicted, const VehicleState &reference, const ControlInput &control, const CostWeights &weights)
 {
     double cost = 0.0;
 

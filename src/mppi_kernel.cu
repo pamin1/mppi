@@ -1,5 +1,11 @@
 #include <mppi/mppi_kernel.cuh>
 
+__global__ void setupRNG(curandState *states, unsigned long seed)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    curand_init(seed, idx, 0, &states[idx]);
+}
+
 __global__ void mppiKernel(ControlInput *controlSamples, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering)
 {
     // each thread will handle 1 of the MPPI samples
@@ -59,7 +65,7 @@ void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int blo
     setupRNG<<<grid, block>>>(d_states, seed);
 }
 
-void launchMPPIKernel(ControlInput *d_controlSamples, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering, float minAccel, float maxAccel, float minSteer, float maxSteer, int grid, int block)
+void launchMPPIKernel(ControlInput *d_controlSamples, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering, int grid, int block)
 {
     mppiKernel<<<grid, block>>>(d_controlSamples, d_costs, d_nominalSequence, d_refTraj, d_currState, d_weights, d_params, d_rngStates, samples, horizon, dt, sigmaAccel, sigmaSteering);
 }

@@ -90,11 +90,60 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}/)
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME}/)
 install(DIRECTORY resources DESTINATION share/${PROJECT_NAME}/)
 
+# Shared CUDA kernels library
+add_library(mppi_kernels
+  src/mppi_kernel.cu  # Implementation only
+)
+target_include_directories(mppi_kernels PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(mppi_kernels
+  ${CUDA_LIBRARIES}
+  cudart
+  curand
+)
+
 if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  set(ament_cmake_copyright_FOUND TRUE)
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
+  find_package(ament_cmake_gtest REQUIRED)
+  
+  # dynamics test
+  ament_add_gtest(test_dynamics test/test_dynamics.cpp)
+  target_include_directories(test_dynamics PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CUDA_INCLUDE_DIRS}
+  )
+  target_link_libraries(test_dynamics
+    ${CUDA_LIBRARIES}
+  )
+  
+  # kernel tests
+  add_library(test_kernel_device 
+    test/test_kernel_device.cu  # Only test wrappers
+  )
+  target_link_libraries(test_kernel_device
+    mppi_kernels
+    ${CUDA_LIBRARIES}
+    cudart
+    curand
+  )
+  
+  ament_add_gtest(test_kernel test/test_kernel.cpp)
+  target_link_libraries(test_kernel
+    test_kernel_device
+    ${CUDA_LIBRARIES}
+  )
+  
+  # integration tests
+  # ament_add_gtest(test_mppi_controller
+  #   test/test_mppi_controller.cpp
+  # )
+  # ament_target_dependencies(test_mppi_controller
+  #   rclcpp
+  # )
+  # target_include_directories(test_mppi_controller PUBLIC
+  #   ${CMAKE_CURRENT_SOURCE_DIR}/include
+  # )
+  
 endif()
 
 ament_package()
