@@ -211,6 +211,21 @@ void MPPI_Controller::updateControl()
     cudaMemcpy(d_currState, &state, sizeof(VehicleState), cudaMemcpyHostToDevice);
 
     launchMPPIKernel(d_controls, d_costs, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates, samples, horizon, dt, sigmaAcceleration, sigmaSteering, grid, block);
+
+    // use thrust to do parallel reductions and cost weighting
+    // reduce for min cost
+    double minCost = thrust::reduce(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), INFINITY, thrust::minimum<double>());
+    
+    // exponential weighting functor to transform the cost array
+    thrust::transform(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), thrust::device_pointer_cast(d_costs), weightFunctor(minCost, temperature));
+    
+    // sum to get the sum of the weights
+    double weightSum = thrust::reduce(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples));
+
+    // normalize the weighted costs
+    thrust::transform(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), thrust::device_pointer_cast(d_costs), thrust::placeholders::_1 / weightSum);
+    
+
 }
 
 int main(int argc, char **argv)

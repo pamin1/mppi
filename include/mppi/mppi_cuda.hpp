@@ -10,13 +10,37 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
+#include <thrust/device_vector.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/reduce.h>
+#include <thrust/transform.h>
+
+struct weightFunctor
+{
+    // member variables (state)
+    double minCost;
+    double lambda;
+
+    // constructor to initialize state
+    __host__ __device__ weightFunctor(double _min, double _lambda)
+        : minCost(_min), lambda(_lambda)
+    {
+    }
+
+    // function operator
+    __host__ __device__ double operator()(double cost) const
+    {
+        return exp(-(cost - minCost) / lambda);
+    }
+};
 
 class MPPI_Controller : public rclcpp::Node
 {
   public:
     MPPI_Controller();
     ~MPPI_Controller();
-    
+
     void loadParameters();
     void updateState(const nav_msgs::msg::Odometry::SharedPtr odom);
     void updateTraj(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj);

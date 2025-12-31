@@ -51,15 +51,6 @@ __global__ void mppiKernel(ControlInput *controlSamples, double *costs, const Co
     states[k] = localState;
 }
 
-__global__ void softMax()
-{
-    // step 1: find the minmum cost -- cpu
-
-    // step 2: for each sample and cost we get an exponential weight -- gpu
-
-    // step 3: normalize the weights -- gpu
-}
-
 void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int block)
 {
     setupRNG<<<grid, block>>>(d_states, seed);
