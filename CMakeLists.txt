@@ -1,16 +1,15 @@
 cmake_minimum_required(VERSION 3.8)
-project(mppi LANGUAGES CXX CUDA)
+project(mppi LANGUAGES CXX)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# CUDA setup
-find_package(CUDA REQUIRED)
-enable_language(CUDA)
+set(CMAKE_CUDA_HOST_COMPILER /usr/bin/g++-10)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_ARCHITECTURES 75)
+enable_language(CUDA)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
@@ -24,34 +23,43 @@ find_package(ackermann_msgs REQUIRED)
 find_package(autoware_auto_planning_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(CUDAToolkit REQUIRED)
+find_package(Thrust REQUIRED CONFIG)
+thrust_create_target(Thrust)
 
-# Install Python modules
 ament_python_install_package(${PROJECT_NAME})
-
-# CUDA executable with .cu files
-add_executable(mppi_controller_node 
-  src/mppi_cuda.cpp
+add_library(mppi_kernels
   src/mppi_kernel.cu
 )
 
-# Set CUDA flags
-target_compile_options(mppi_controller_node PRIVATE
+target_include_directories(mppi_kernels PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_compile_options(mppi_kernels PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:
     --expt-relaxed-constexpr
     --use_fast_math
-    -Wno-pedantic
+    -ccbin=/usr/bin/g++-10
   >
 )
 
-# Include directories
+target_link_libraries(mppi_kernels
+  CUDA::cudart
+  CUDA::curand
+  Thrust
+)
+
+add_executable(mppi_controller_node 
+  src/mppi_cuda.cpp
+)
+
 target_include_directories(mppi_controller_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
-  ${CUDA_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
 )
 
-# Link dependencies
 ament_target_dependencies(mppi_controller_node
   rclcpp
   nav_msgs
@@ -63,19 +71,16 @@ ament_target_dependencies(mppi_controller_node
   tf2_geometry_msgs
 )
 
-# Link CUDA libraries
 target_link_libraries(mppi_controller_node
-  ${CUDA_LIBRARIES}
-  cudart
-  curand
+  mppi_kernels
+  CUDA::cudart
+  CUDA::curand
 )
 
-# Install executable
-install(TARGETS mppi_controller_node
+install(TARGETS mppi_controller_node mppi_kernels
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# Install headers
 install(DIRECTORY include/
   DESTINATION include/
 )
@@ -90,60 +95,33 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}/)
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME}/)
 install(DIRECTORY resources DESTINATION share/${PROJECT_NAME}/)
 
-# Shared CUDA kernels library
-add_library(mppi_kernels
-  src/mppi_kernel.cu  # Implementation only
-)
-target_include_directories(mppi_kernels PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-target_link_libraries(mppi_kernels
-  ${CUDA_LIBRARIES}
-  cudart
-  curand
-)
-
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   
-  # dynamics test
   ament_add_gtest(test_dynamics test/test_dynamics.cpp)
   target_include_directories(test_dynamics PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CUDA_INCLUDE_DIRS}
-  )
-  target_link_libraries(test_dynamics
-    ${CUDA_LIBRARIES}
   )
   
-  # kernel tests
   add_library(test_kernel_device 
-    test/test_kernel_device.cu  # Only test wrappers
+    test/test_kernel_device.cu
+  )
+  target_compile_options(test_kernel_device PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:
+      -ccbin=/usr/bin/g++-10
+    >
   )
   target_link_libraries(test_kernel_device
     mppi_kernels
-    ${CUDA_LIBRARIES}
-    cudart
-    curand
+    CUDA::cudart
+    CUDA::curand
+    Thrust
   )
   
   ament_add_gtest(test_kernel test/test_kernel.cpp)
   target_link_libraries(test_kernel
     test_kernel_device
-    ${CUDA_LIBRARIES}
   )
-  
-  # integration tests
-  # ament_add_gtest(test_mppi_controller
-  #   test/test_mppi_controller.cpp
-  # )
-  # ament_target_dependencies(test_mppi_controller
-  #   rclcpp
-  # )
-  # target_include_directories(test_mppi_controller PUBLIC
-  #   ${CMAKE_CURRENT_SOURCE_DIR}/include
-  # )
-  
 endif()
 
 ament_package()
