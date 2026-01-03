@@ -49,6 +49,7 @@ MPPI_Controller::~MPPI_Controller()
 {
     RCLCPP_INFO(this->get_logger(), "Shutting down MPPI Controller...");
 
+    cudaFree(d_optimalControls);
     cudaFree(d_nominalControls);
     cudaFree(d_refTraj);
     cudaFree(d_currState);
@@ -73,6 +74,19 @@ void MPPI_Controller::trajectoryCallback(const autoware_auto_planning_msgs::msg:
 
 void MPPI_Controller::loadParameters()
 {
+    int deviceCount = 0;
+    cudaGetDeviceCount(&deviceCount);
+
+    if (deviceCount == 0)
+    {
+        RCLCPP_INFO(this->get_logger(), "error: invalid device choosen\n");
+        return;
+    }
+    else
+    {
+        RCLCPP_INFO(this->get_logger(), "Device: %d", deviceCount);
+    }
+
     samples = this->get_parameter("mppi.samples").as_int();
     controlFrequency = this->get_parameter("mppi.control_frequency").as_int();
     dt = 1.0f / controlFrequency;
@@ -92,21 +106,35 @@ void MPPI_Controller::loadParameters()
     weights.rAccel = this->get_parameter("cost_weights.r_accel").as_double();
     weights.rSteering = this->get_parameter("cost_weights.r_steering").as_double();
 
-    RCLCPP_INFO(this->get_logger(), "MPPI Parameters:");
-    RCLCPP_INFO(this->get_logger(), "\tSamples:\t%d", samples);
-    RCLCPP_INFO(this->get_logger(), "\tFrequency:\t%d Hz", controlFrequency);
-    RCLCPP_INFO(this->get_logger(), "\tHorizon:\t%d steps", horizon);
-    RCLCPP_INFO(this->get_logger(), "\tTemperature:\t%.3f", temperature);
+    RCLCPP_INFO(this->get_logger(), "Loaded parameters:");
+    RCLCPP_INFO(this->get_logger(), "  samples: %d", samples);
+    RCLCPP_INFO(this->get_logger(), "  control_frequency: %d", controlFrequency);
+    RCLCPP_INFO(this->get_logger(), "  dt: %.4f", dt);
+    RCLCPP_INFO(this->get_logger(), "  horizon: %d", horizon);
+    RCLCPP_INFO(this->get_logger(), "  temperature: %.3f", temperature);
+    RCLCPP_INFO(this->get_logger(), "  alpha: %.3f", alpha);
+    RCLCPP_INFO(this->get_logger(), "  sigma_accel: %.3f", sigmaAcceleration);
+    RCLCPP_INFO(this->get_logger(), "  sigma_steering: %.3f", sigmaSteering);
+    RCLCPP_INFO(this->get_logger(), "Cost weights:");
+    RCLCPP_INFO(this->get_logger(), "  q_x: %.3f", weights.qX);
+    RCLCPP_INFO(this->get_logger(), "  q_y: %.3f", weights.qY);
+    RCLCPP_INFO(this->get_logger(), "  q_heading: %.3f", weights.qHeading);
+    RCLCPP_INFO(this->get_logger(), "  q_vx: %.3f", weights.qVx);
+    RCLCPP_INFO(this->get_logger(), "  q_vy: %.3f", weights.qVy);
+    RCLCPP_INFO(this->get_logger(), "  q_yaw_rate: %.3f", weights.qYawRate);
+    RCLCPP_INFO(this->get_logger(), "  r_accel: %.3f", weights.rAccel);
+    RCLCPP_INFO(this->get_logger(), "  r_steering: %.3f", weights.rSteering);
 
     // set up GPU arrays
-    cudaMalloc((void **)&d_nominalControls, sizeof(ControlInput) * horizon);
-    cudaMalloc((void **)&d_refTraj, sizeof(VehicleState) * horizon);
-    cudaMalloc((void **)&d_currState, sizeof(VehicleState));
-    cudaMalloc((void **)&d_weights, sizeof(CostWeights));
-    cudaMalloc((void **)&d_params, sizeof(VehicleParams));
-    cudaMalloc((void **)&d_rngStates, sizeof(curandState) * samples);
-    cudaMalloc((void **)&d_controls, sizeof(ControlInput) * samples * horizon); // 30 * 10000 * 16B = 3MB+??
-    cudaMalloc((void **)&d_costs, sizeof(double) * samples);
+    CHECK_ERROR(cudaMalloc((void **)&d_optimalControls, sizeof(ControlInput) * horizon));
+    CHECK_ERROR(cudaMalloc((void **)&d_nominalControls, sizeof(ControlInput) * horizon));
+    CHECK_ERROR(cudaMalloc((void **)&d_refTraj, sizeof(VehicleState) * horizon));
+    CHECK_ERROR(cudaMalloc((void **)&d_currState, sizeof(VehicleState)));
+    CHECK_ERROR(cudaMalloc((void **)&d_weights, sizeof(CostWeights)));
+    CHECK_ERROR(cudaMalloc((void **)&d_params, sizeof(VehicleParams)));
+    CHECK_ERROR(cudaMalloc((void **)&d_rngStates, sizeof(curandState) * samples));
+    CHECK_ERROR(cudaMalloc((void **)&d_controls, sizeof(ControlInput) * samples * horizon)); // 30 * 10000 * 16B = 3MB+??
+    CHECK_ERROR(cudaMalloc((void **)&d_costs, sizeof(double) * samples));
 
     // copy fixed values over
     cudaMemcpy(d_weights, &weights, sizeof(CostWeights), cudaMemcpyHostToDevice);
@@ -191,6 +219,7 @@ void MPPI_Controller::updateControl()
     catch (...)
     {
         RCLCPP_ERROR(this->get_logger(), "Caught error attempting to update vehicle state");
+        return;
     }
 
     // get the initial control sequence -- warm starting
@@ -202,30 +231,37 @@ void MPPI_Controller::updateControl()
             u.acceleration = 0.0;
             u.steering = 0.0;
         }
+        cudaMemcpy(d_nominalControls, nominalControlSequence.data(), sizeof(ControlInput) * horizon, cudaMemcpyHostToDevice);
         controlSeqInitialized = true;
     }
-
+    
     // need to update the nominal control sequence, refTraj, and currState before iterating mppi
-    cudaMemcpy(d_nominalControls, nominalControlSequence.data(), sizeof(ControlInput) * horizon, cudaMemcpyHostToDevice);
     cudaMemcpy(d_refTraj, trajectory.data(), sizeof(VehicleState) * horizon, cudaMemcpyHostToDevice);
     cudaMemcpy(d_currState, &state, sizeof(VehicleState), cudaMemcpyHostToDevice);
 
+    // cost function is the error
     launchMPPIKernel(d_controls, d_costs, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates, samples, horizon, dt, sigmaAcceleration, sigmaSteering, grid, block);
 
-    // use thrust to do parallel reductions and cost weighting
-    // reduce for min cost
-    double minCost = thrust::reduce(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), INFINITY, thrust::minimum<double>());
-    
-    // exponential weighting functor to transform the cost array
-    thrust::transform(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), thrust::device_pointer_cast(d_costs), weightFunctor(minCost, temperature));
-    
-    // sum to get the sum of the weights
-    double weightSum = thrust::reduce(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples));
+    launchThrustWeighting(d_costs, samples, temperature);
 
-    // normalize the weighted costs
-    thrust::transform(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), thrust::device_pointer_cast(d_costs), thrust::placeholders::_1 / weightSum);
-    
+    int agg_block = 32;
+    int agg_grid = (horizon + agg_block - 1) / agg_block;
+    launchAggregateControls(d_optimalControls, d_controls, d_nominalControls, d_costs, alpha, samples, horizon, agg_grid, agg_block);
 
+    // d_optimalControls now has a single optimal control sequence + blended with nominal control for smoothness
+    ControlInput control;
+    cudaMemcpy(&control, d_optimalControls, sizeof(ControlInput), cudaMemcpyDeviceToHost);
+
+    // publish the control
+    ackermann_msgs::msg::AckermannDriveStamped msg;
+    msg.header.stamp = this->now();
+    msg.header.frame_id = baseFrame;
+    msg.drive.speed = control.acceleration;
+    msg.drive.steering_angle = control.steering;
+    controllerPub->publish(msg);
+
+    // copy the optimal controls back to the nominal control input
+    cudaMemcpy(d_nominalControls, d_optimalControls, sizeof(ControlInput) * horizon, cudaMemcpyDeviceToDevice);
 }
 
 int main(int argc, char **argv)
