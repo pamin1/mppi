@@ -2,8 +2,26 @@
 #include <cuda_runtime_api.h>
 #include <curand_kernel.h>
 #include <device_launch_parameters.h>
-#include <mppi/kernel_launch.hpp>
 #include <mppi/vehicle_util.hpp>
+
+struct weightFunctor
+{
+    // member variables (state)
+    double minCost;
+    double lambda;
+
+    // constructor to initialize state
+    __host__ __device__ weightFunctor(double _min, double _lambda)
+        : minCost(_min), lambda(_lambda)
+    {
+    }
+
+    // function operator
+    __device__ double operator()(double cost) const
+    {
+        return exp(-(cost - minCost) / lambda);
+    }
+};
 
 __device__ inline float clamp(float value, float min_val, float max_val)
 {
@@ -63,3 +81,13 @@ __device__ __forceinline__ double computeCost(const VehicleState &predicted, con
  * @param sigmaSteering Standard Deviation for steering
  */
 __global__ void mppiKernel(ControlInput *controlSamples, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering);
+
+/**
+ * @brief Computes the weigthed optimal control input for each time step in the horizon
+ * @param optimalControls Optimal aggregate of the weighted control inputs
+ * @param sampleControls Input sample control sequences
+ * @param weightedCosts Array of costs for each sample control input
+ * @param samples Number of path samples
+ * @param horizon Length of horizon
+ */
+__global__ void aggregateControls(ControlInput *optimalControls, const ControlInput *sampleControls, const ControlInput *nominalControls, const double *weightedCosts, float alpha, int samples, int horizon);

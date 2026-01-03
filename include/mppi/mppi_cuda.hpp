@@ -10,30 +10,7 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
-#include <thrust/device_vector.h>
-#include <thrust/functional.h>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/reduce.h>
-#include <thrust/transform.h>
-
-struct weightFunctor
-{
-    // member variables (state)
-    double minCost;
-    double lambda;
-
-    // constructor to initialize state
-    __host__ __device__ weightFunctor(double _min, double _lambda)
-        : minCost(_min), lambda(_lambda)
-    {
-    }
-
-    // function operator
-    __host__ __device__ double operator()(double cost) const
-    {
-        return exp(-(cost - minCost) / lambda);
-    }
-};
+#include <mppi/util.hpp>
 
 class MPPI_Controller : public rclcpp::Node
 {
@@ -70,6 +47,7 @@ class MPPI_Controller : public rclcpp::Node
     // GPU arrays
     int block, grid;
 
+    ControlInput *d_optimalControls;
     ControlInput *d_nominalControls;
     VehicleState *d_refTraj;
     VehicleState *d_currState;

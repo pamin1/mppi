@@ -23,3 +23,23 @@ void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int blo
  * @param block Size of block
  */
 void launchMPPIKernel(ControlInput *d_controlSamples, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering, int grid, int block);
+
+/**
+ * @brief Executes the thrust device functions
+ * @param d_costs Control input costs
+ * @param samples Number of samples
+ * @param temperature Distribution of exponential weighting for costs
+ */
+void launchThrustWeighting(double *d_costs, int samples, float temperature);
+
+/**
+ * @brief Computes the weigthed optimal control input for each time step in the horizon
+ * @param optimalControls Optimal aggregate of the weighted control inputs
+ * @param sampleControls Input sample control sequences
+ * @param weightedCosts Array of costs for each sample control input
+ * @param samples Number of path samples
+ * @param horizon Length of horizon
+ * @param grid Size of grid
+ * @param block Size of block
+ */
+void launchAggregateControls(ControlInput *d_optimalControls, const ControlInput *d_sampleControls, const ControlInput *d_nominalControls, const double *d_weightedCosts, float alpha, int samples, int horizon, int grid, int block);
