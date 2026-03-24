@@ -86,7 +86,6 @@ install(DIRECTORY include/
 )
 
 install(PROGRAMS
-  scripts/mppi_controller.py
   scripts/path_planner.py
   DESTINATION lib/${PROJECT_NAME}
 )

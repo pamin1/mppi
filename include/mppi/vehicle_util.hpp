@@ -21,7 +21,7 @@ struct VehicleParams
 
     // Default constructor with F1TENTH values
     VehicleParams()
-        : mu(1.0489), csf(4.718), csr(5.456), lf(0.15875), lr(0.17145), h(0.074), mass(3.74), iz(0.04712), g(9.81), alphaSat(0.19), fxSplit(0.45), minVelocity(-5.0), maxVelocity(20.0), minAcceleration(-10.0), maxAcceleration(9.51), minSteeringAngle(-0.9189), maxSteeringAngle(0.9189) // ~52.7 degrees
+        : mu(1.0489), csf(4.718), csr(5.456), lf(0.15875), lr(0.17145), h(0.074), mass(3.74), iz(0.04712), g(9.81), alphaSat(0.19), fxSplit(0.45), minVelocity(-5.0), maxVelocity(20.0), minAcceleration(-10.0), maxAcceleration(9.51), minSteeringAngle(-0.5236), maxSteeringAngle(0.5236) // ~52.7 degrees
     {
     }
 };
