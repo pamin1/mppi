@@ -93,12 +93,11 @@ class GlobalTrajectoryPublisher(Node):
                 min_idx + self.lookahead > self.N
             ):  # traj points need to mod the size of the arrays
                 remain = min_idx + self.lookahead - self.N + 1
-                xx = np.hstack([self.x[min_idx:-1]], self.x[:remain])
-                yy = np.hstack([self.y[min_idx:-1]], self.y[:remain])
-                vv = np.hstack([self.speed[min_idx:-1]], self.speed[:remain])
-                hh = np.hstack([self.yaw[min_idx:-1]], self.yaw[:remain])
-
-                kk = np.hstack([self.kappa[min_idx:-1]], self.kappa[:remain])
+                xx = np.hstack([self.x[min_idx:-1], self.x[:remain]])
+                yy = np.hstack([self.y[min_idx:-1], self.y[:remain]])
+                vv = np.hstack([self.speed[min_idx:-1], self.speed[:remain]])
+                hh = np.hstack([self.yaw[min_idx:-1], self.yaw[:remain]])
+                kk = np.hstack([self.kappa[min_idx:-1], self.kappa[:remain]])
             else:
                 xx = self.x[min_idx : min_idx + self.lookahead]
                 yy = self.y[min_idx : min_idx + self.lookahead]
