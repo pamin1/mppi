@@ -22,6 +22,7 @@ find_package(nav_msgs REQUIRED)
 find_package(ackermann_msgs REQUIRED)
 find_package(autoware_auto_planning_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Thrust REQUIRED CONFIG)
@@ -69,6 +70,7 @@ ament_target_dependencies(mppi_controller_node
   autoware_auto_planning_msgs
   tf2_ros
   tf2_geometry_msgs
+  visualization_msgs
 )
 
 target_link_libraries(mppi_controller_node

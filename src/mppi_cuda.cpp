@@ -1,4 +1,6 @@
 #include <mppi/mppi_cuda.hpp>
+#include <algorithm>
+#include <numeric>
 
 // make an include file for the vehicle dynamics and the function stepping
 
@@ -27,6 +29,12 @@ MPPI_Controller::MPPI_Controller()
     // control effort weights
     this->declare_parameter("cost_weights.r_accel", 0.1);
     this->declare_parameter("cost_weights.r_steering", 0.1);
+
+    // visualization
+    this->declare_parameter("visualization.enable_viz", true);
+    this->declare_parameter("visualization.top_k_paths", 10);
+    this->declare_parameter("visualization.line_width", 0.02);
+    this->declare_parameter("visualization.path_alpha", 0.7);
     loadParameters();
 
     // tranforms
@@ -39,6 +47,7 @@ MPPI_Controller::MPPI_Controller()
 
     // publishers
     controllerPub = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/drive", 10);
+    vizPub = this->create_publisher<visualization_msgs::msg::MarkerArray>("/mppi/top_k_paths", 10);
 
     // timer
     controlTimer = this->create_wall_timer(std::chrono::duration<float>(dt), std::bind(&MPPI_Controller::updateControl, this));
@@ -105,6 +114,11 @@ void MPPI_Controller::loadParameters()
     weights.qYawRate = this->get_parameter("cost_weights.q_yaw_rate").as_double();
     weights.rAccel = this->get_parameter("cost_weights.r_accel").as_double();
     weights.rSteering = this->get_parameter("cost_weights.r_steering").as_double();
+
+    enableViz = this->get_parameter("visualization.enable_viz").as_bool();
+    topKPaths = this->get_parameter("visualization.top_k_paths").as_int();
+    vizLineWidth = static_cast<float>(this->get_parameter("visualization.line_width").as_double());
+    vizPathAlpha = static_cast<float>(this->get_parameter("visualization.path_alpha").as_double());
 
     RCLCPP_INFO(this->get_logger(), "Loaded parameters:");
     RCLCPP_INFO(this->get_logger(), "  samples: %d", samples);
@@ -244,6 +258,15 @@ void MPPI_Controller::updateControl()
 
     launchThrustWeighting(d_costs, samples, temperature);
 
+    if (enableViz)
+    {
+        std::vector<double> weights(samples);
+        std::vector<ControlInput> allControls(samples * horizon);
+        cudaMemcpy(weights.data(), d_costs, sizeof(double) * samples, cudaMemcpyDeviceToHost);
+        cudaMemcpy(allControls.data(), d_controls, sizeof(ControlInput) * samples * horizon, cudaMemcpyDeviceToHost);
+        publishTopKPaths(weights, allControls);
+    }
+
     int agg_block = 32;
     int agg_grid = (horizon + agg_block - 1) / agg_block;
     launchAggregateControls(d_optimalControls, d_controls, d_nominalControls, d_costs, alpha, samples, horizon, agg_grid, agg_block);
@@ -262,6 +285,69 @@ void MPPI_Controller::updateControl()
 
     // copy the optimal controls back to the nominal control input
     cudaMemcpy(d_nominalControls, d_optimalControls, sizeof(ControlInput) * horizon, cudaMemcpyDeviceToDevice);
+}
+
+void MPPI_Controller::publishTopKPaths(const std::vector<double> &weights, const std::vector<ControlInput> &allControls)
+{
+    int k = std::min(topKPaths, samples);
+
+    // Find top-k sample indices by highest weight (higher weight = lower cost = better path)
+    std::vector<int> indices(samples);
+    std::iota(indices.begin(), indices.end(), 0);
+    std::partial_sort(indices.begin(), indices.begin() + k, indices.end(),
+        [&weights](int a, int b) { return weights[a] > weights[b]; });
+
+    visualization_msgs::msg::MarkerArray markerArray;
+
+    // Delete stale markers from previous publish (in case k shrank)
+    visualization_msgs::msg::Marker deleteAll;
+    deleteAll.action = visualization_msgs::msg::Marker::DELETEALL;
+    markerArray.markers.push_back(deleteAll);
+
+    for (int rank = 0; rank < k; ++rank)
+    {
+        int sampleIdx = indices[rank];
+
+        visualization_msgs::msg::Marker marker;
+        marker.header.stamp = this->now();
+        marker.header.frame_id = mapFrame;
+        marker.ns = "mppi_paths";
+        marker.id = rank;
+        marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.scale.x = vizLineWidth;
+        marker.pose.orientation.w = 1.0;
+
+        // Green (rank 0, best) -> Red (rank k-1, worst of top-k)
+        float t = (k > 1) ? static_cast<float>(rank) / static_cast<float>(k - 1) : 0.0f;
+        marker.color.r = t;
+        marker.color.g = 1.0f - t;
+        marker.color.b = 0.0f;
+        marker.color.a = vizPathAlpha;
+
+        // Simulate trajectory forward from current state using this sample's controls
+        VehicleState simState = state;
+
+        geometry_msgs::msg::Point pt;
+        pt.x = simState.x;
+        pt.y = simState.y;
+        pt.z = 0.0;
+        marker.points.push_back(pt);
+
+        for (int t_step = 0; t_step < horizon; ++t_step)
+        {
+            const ControlInput &ctrl = allControls[sampleIdx * horizon + t_step];
+            simState = stepDynamicsCPU(simState, params, ctrl, dt);
+            pt.x = simState.x;
+            pt.y = simState.y;
+            pt.z = 0.0;
+            marker.points.push_back(pt);
+        }
+
+        markerArray.markers.push_back(marker);
+    }
+
+    vizPub->publish(markerArray);
 }
 
 int main(int argc, char **argv)

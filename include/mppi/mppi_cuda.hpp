@@ -10,6 +10,7 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 #include <mppi/util.hpp>
 
 class MPPI_Controller : public rclcpp::Node
@@ -25,6 +26,7 @@ class MPPI_Controller : public rclcpp::Node
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void trajectoryCallback(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr msg);
     void updateControl();
+    void publishTopKPaths(const std::vector<double> &weights, const std::vector<ControlInput> &allControls);
 
   private:
     // controller set up
@@ -43,6 +45,12 @@ class MPPI_Controller : public rclcpp::Node
     std::vector<ControlInput> nominalControlSequence;
     std::vector<VehicleState> trajectory;
     float sigmaAcceleration, sigmaSteering; // control noise for sampling
+
+    // visualization
+    bool enableViz;
+    int topKPaths;
+    float vizLineWidth;
+    float vizPathAlpha;
 
     // GPU arrays
     int block, grid;
@@ -75,6 +83,7 @@ class MPPI_Controller : public rclcpp::Node
 
     // publishers
     rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr controllerPub;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr vizPub;
 
     // timer
     rclcpp::TimerBase::SharedPtr controlTimer;
