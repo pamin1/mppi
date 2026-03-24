@@ -8,8 +8,8 @@ MU = 1.0489
 G = 9.81
 ACCEL_MAX = 9.5  # m/s^2
 DECEL_MAX = 10.0  # m/s^2
-V_MAX = 20.0  # m/s
-SAFETY_BUFFER = 0.70  # meters
+V_MAX = 7.50  # m/s
+SAFETY_BUFFER = 0.50  # meters
 
 # read out the csv, get the x and y coords
 cwd = os.getcwd()
