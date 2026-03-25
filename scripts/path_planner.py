@@ -23,6 +23,9 @@ class GlobalTrajectoryPublisher(Node):
         self.odom = None
         self.lookahead = 75
 
+        self.declare_parameter('control_dt', 0.02)
+        self.control_dt = self.get_parameter('control_dt').value
+
         # load path
         share_dir = get_package_share_directory("mppi")
         file = os.path.join(share_dir, "resources/Spielberg_map_optimized.csv")
@@ -89,21 +92,30 @@ class GlobalTrajectoryPublisher(Node):
             # min_idx = (np.argmin(dist_sq) + self.N - 25) % self.N
             min_idx = np.argmin(dist_sq)
 
-            if (
-                min_idx + self.lookahead > self.N
-            ):  # traj points need to mod the size of the arrays
-                remain = min_idx + self.lookahead - self.N + 1
-                xx = np.hstack([self.x[min_idx:], self.x[:remain]])
-                yy = np.hstack([self.y[min_idx:], self.y[:remain]])
-                vv = np.hstack([self.speed[min_idx:], self.speed[:remain]])
-                hh = np.hstack([self.yaw[min_idx:], self.yaw[:remain]])
-                kk = np.hstack([self.kappa[min_idx:], self.kappa[:remain]])
-            else:
-                xx = self.x[min_idx : min_idx + self.lookahead]
-                yy = self.y[min_idx : min_idx + self.lookahead]
-                vv = self.speed[min_idx : min_idx + self.lookahead]
-                hh = self.yaw[min_idx : min_idx + self.lookahead]
-                kk = self.kappa[min_idx : min_idx + self.lookahead]
+            # Temporal resampling: find the raceline point corresponding to
+            # t = i * control_dt for each output index i, so refTrajectory[i]
+            # matches what the MPPI kernel expects at time i * dt.
+            window_size = min(self.N, 500)
+            idx_window = [(min_idx + j) % self.N for j in range(window_size)]
+
+            wx = self.x[idx_window]
+            wy = self.y[idx_window]
+            wv = np.maximum(self.speed[idx_window], 0.1)
+
+            ds = np.sqrt(np.diff(wx)**2 + np.diff(wy)**2)
+            dt_segs = ds / wv[:-1]
+            t_cumulative = np.concatenate([[0.0], np.cumsum(dt_segs)])
+
+            target_times = np.arange(1, self.lookahead + 1) * self.control_dt
+            wi = np.searchsorted(t_cumulative, target_times)
+            wi = np.clip(wi, 0, window_size - 1)
+
+            ri = [idx_window[w] for w in wi]
+            xx = self.x[ri]
+            yy = self.y[ri]
+            vv = self.speed[ri]
+            hh = self.yaw[ri]
+            kk = self.kappa[ri]
 
             traj_msg = Trajectory()
             traj_msg.header.stamp = self.get_clock().now().to_msg()
