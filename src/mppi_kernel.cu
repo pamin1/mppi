@@ -49,6 +49,12 @@ __global__ void mppiKernel(ControlInput *controlSamples, double *costs, const Co
     {
         rollingState = stepDynamics(rollingState, p, controls[i], dt);
         cost += computeCost(rollingState, refTrajectory[i], controls[i], w);
+
+        if (i > 0)
+        {
+            double dsteer = controls[i].steering - controls[i - 1].steering;
+            cost += w.rSteeringRate * dsteer * dsteer;
+        }
     }
 
     // store costs and cuRAND

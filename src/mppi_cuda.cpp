@@ -1,5 +1,5 @@
-#include <mppi/mppi_cuda.hpp>
 #include <algorithm>
+#include <mppi/mppi_cuda.hpp>
 #include <numeric>
 
 // make an include file for the vehicle dynamics and the function stepping
@@ -29,6 +29,7 @@ MPPI_Controller::MPPI_Controller()
     // control effort weights
     this->declare_parameter("cost_weights.r_accel", 0.1);
     this->declare_parameter("cost_weights.r_steering", 0.1);
+    this->declare_parameter("cost_weights.r_steering_rate", 0.1);
 
     // visualization
     this->declare_parameter("visualization.enable_viz", true);
@@ -114,6 +115,7 @@ void MPPI_Controller::loadParameters()
     weights.qYawRate = this->get_parameter("cost_weights.q_yaw_rate").as_double();
     weights.rAccel = this->get_parameter("cost_weights.r_accel").as_double();
     weights.rSteering = this->get_parameter("cost_weights.r_steering").as_double();
+    weights.rSteeringRate = this->get_parameter("cost_weights.r_steering_rate").as_double();
 
     enableViz = this->get_parameter("visualization.enable_viz").as_bool();
     topKPaths = this->get_parameter("visualization.top_k_paths").as_int();
@@ -138,6 +140,7 @@ void MPPI_Controller::loadParameters()
     RCLCPP_INFO(this->get_logger(), "  q_yaw_rate: %.3f", weights.qYawRate);
     RCLCPP_INFO(this->get_logger(), "  r_accel: %.3f", weights.rAccel);
     RCLCPP_INFO(this->get_logger(), "  r_steering: %.3f", weights.rSteering);
+    RCLCPP_INFO(this->get_logger(), "  r_steering_rate: %.3f", weights.rSteeringRate);
 
     // set up GPU arrays
     CHECK_ERROR(cudaMalloc((void **)&d_optimalControls, sizeof(ControlInput) * horizon));
@@ -242,13 +245,13 @@ void MPPI_Controller::updateControl()
         nominalControlSequence.resize(horizon);
         for (auto &u : nominalControlSequence)
         {
-            u.acceleration = 0.0;
+            u.acceleration = 0.1;
             u.steering = 0.0;
         }
         cudaMemcpy(d_nominalControls, nominalControlSequence.data(), sizeof(ControlInput) * horizon, cudaMemcpyHostToDevice);
         controlSeqInitialized = true;
     }
-    
+
     // need to update the nominal control sequence, refTraj, and currState before iterating mppi
     cudaMemcpy(d_refTraj, trajectory.data(), sizeof(VehicleState) * horizon, cudaMemcpyHostToDevice);
     cudaMemcpy(d_currState, &state, sizeof(VehicleState), cudaMemcpyHostToDevice);
@@ -279,12 +282,15 @@ void MPPI_Controller::updateControl()
     ackermann_msgs::msg::AckermannDriveStamped msg;
     msg.header.stamp = this->now();
     msg.header.frame_id = baseFrame;
-    msg.drive.speed = control.acceleration;
+    msg.drive.speed = std::clamp(static_cast<float>(state.vx + control.acceleration * dt), 
+                                  -params.maxVelocity, params.maxVelocity);
     msg.drive.steering_angle = control.steering;
     controllerPub->publish(msg);
 
     // copy the optimal controls back to the nominal control input
-    cudaMemcpy(d_nominalControls, d_optimalControls, sizeof(ControlInput) * horizon, cudaMemcpyDeviceToDevice);
+    // shift left by 1, repeat last entry
+    cudaMemcpy(d_nominalControls, d_optimalControls + 1, sizeof(ControlInput) * (horizon - 1), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_nominalControls + (horizon - 1), d_optimalControls + (horizon - 1), sizeof(ControlInput), cudaMemcpyDeviceToDevice);
 }
 
 void MPPI_Controller::publishTopKPaths(const std::vector<double> &weights, const std::vector<ControlInput> &allControls)
@@ -295,7 +301,8 @@ void MPPI_Controller::publishTopKPaths(const std::vector<double> &weights, const
     std::vector<int> indices(samples);
     std::iota(indices.begin(), indices.end(), 0);
     std::partial_sort(indices.begin(), indices.begin() + k, indices.end(),
-        [&weights](int a, int b) { return weights[a] > weights[b]; });
+                      [&weights](int a, int b)
+                      { return weights[a] > weights[b]; });
 
     visualization_msgs::msg::MarkerArray markerArray;
 
@@ -337,7 +344,7 @@ void MPPI_Controller::publishTopKPaths(const std::vector<double> &weights, const
         for (int t_step = 0; t_step < horizon; ++t_step)
         {
             const ControlInput &ctrl = allControls[sampleIdx * horizon + t_step];
-            simState = stepDynamicsCPU(simState, params, ctrl, dt);
+            simState = stepDynamics(simState, params, ctrl, dt);
             pt.x = simState.x;
             pt.y = simState.y;
             pt.z = 0.0;

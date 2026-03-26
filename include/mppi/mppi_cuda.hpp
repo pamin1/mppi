@@ -32,6 +32,7 @@ class MPPI_Controller : public rclcpp::Node
     // controller set up
     std::string mapFrame = "map";
     std::string baseFrame = "ego_racecar/base_link";
+    double currentSteeringAngle = 0;
 
     int samples;
     int controlFrequency;
