@@ -87,7 +87,7 @@ def generate_launch_description():
     mppi_controller = Node(
         package="mppi",
         executable="mppi_controller_node",
-        name="mppi_controller",
+        name="mppi_controller_node",
         output="screen",
         parameters=[
             mppi_params_file,
