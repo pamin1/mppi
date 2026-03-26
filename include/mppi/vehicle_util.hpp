@@ -21,7 +21,7 @@ struct VehicleParams
 
     // Default constructor with F1TENTH values
     VehicleParams()
-        : mu(1.0489), csf(4.718), csr(5.456), lf(0.15875), lr(0.17145), h(0.074), mass(3.74), iz(0.04712), g(9.81), alphaSat(0.19), fxSplit(0.45), minVelocity(-5.0), maxVelocity(7.5), minAcceleration(-20.0), maxAcceleration(20.0), minSteeringAngle(-0.5236), maxSteeringAngle(0.5236) // ~52.7 degrees
+        : mu(1.0489), csf(4.718), csr(5.456), lf(0.15875), lr(0.17145), h(0.074), mass(3.74), iz(0.04712), g(9.81), alphaSat(0.19), fxSplit(0.45), minVelocity(0.0), maxVelocity(10.0), minAcceleration(-10.0), maxAcceleration(20.0), minSteeringAngle(-0.5236), maxSteeringAngle(0.5236) // ~52.7 degrees
     {
     }
 };
@@ -47,40 +47,22 @@ struct CostWeights
     double qHeading;
     double qVx, qVy;
     double qYawRate;
-    double rAccel, rSteering;
+    double rAccel, rSteering, rSteeringRate;
 };
 
 __host__ __device__ inline VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)
 {
     VehicleState nextState = state;
 
-    double vx_safe = fmax(0.5, state.vx);
+    double L = params.lf + params.lr;
+    double beta = atan(params.lr / L * tan(control.steering));
 
-    // compute derivatives
-    // pose derivatives
-    double x_dot = vx_safe * cos(state.heading) - state.vy * sin(state.heading);
-    double y_dot = vx_safe * sin(state.heading) + state.vy * cos(state.heading);
-    double heading_dot = state.yawRate;
-
-    // speed derivatives
-    double vx_dot = control.acceleration + state.vy * state.yawRate;
-
-    double vy_dot = -(params.csf + params.csr) / (params.mass * vx_safe) * state.vy;
-    vy_dot += (params.csr * params.lr - params.csf * params.lf) / (params.mass * vx_safe) * state.yawRate;
-    vy_dot -= vx_safe * state.yawRate;
-    vy_dot += params.csf / params.mass * control.steering;
-
-    double yawRate_dot = state.vy * (params.csr * params.lr - params.csf * params.lf) / (params.iz * vx_safe);
-    yawRate_dot += state.yawRate * (params.csr * params.lr * params.lr - params.csf * params.lf * params.lf) / (params.iz * vx_safe);
-    yawRate_dot += control.steering * params.lf * params.csf / params.iz;
-
-    // compute integration - euler for now
-    nextState.x += x_dot * dt;
-    nextState.y += y_dot * dt;
-    nextState.heading += heading_dot * dt;
-    nextState.vx = fmax(nextState.vx + vx_dot * dt, 0.0);
-    nextState.vy += vy_dot * dt;
-    nextState.yawRate += yawRate_dot * dt;
+    nextState.x = state.x + state.vx * cos(state.heading + beta) * dt;
+    nextState.y = state.y + state.vx * sin(state.heading + beta) * dt;
+    nextState.heading = state.heading + (state.vx / L) * sin(beta) * dt;
+    nextState.vx = fmax(state.vx + control.acceleration * dt, 0.0);
+    nextState.vy = 0.0;
+    nextState.yawRate = (state.vx / L) * sin(beta);
 
     return nextState;
 }

@@ -3,22 +3,25 @@ mppi_controller:
     mppi:
       samples: 10000
       control_frequency: 50
-      horizon: 25
-      temperature: 0.5
-      alpha: 0.1
+      horizon: 30
+      accel_dist: 1.0
+      steer_dist: 0.05
+      temperature: 1.0
+      alpha: 1.0
     
     cost_weights:
-      q_x: 2.5
-      q_y: 2.5
-      q_heading: 1.0
-      q_vx: 0.001
-      q_vy: 0.0
+      q_x: 2.0
+      q_y: 2.0
+      q_heading: 0.0
+      q_vx: 1.0
+      q_vy: 1.0
       q_yaw_rate: 0.0
       r_accel: 0.001
-      r_steering: 0.001
+      r_steering: 0.01
+      r_steering_rate: 0.01
 
     visualization:
       enable_viz: true
-      top_k_paths: 10
+      top_k_paths: 1
       line_width: 0.05
-      path_alpha: 0.7
+      path_alpha: 1.0
