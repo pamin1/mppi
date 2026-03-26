@@ -2,8 +2,6 @@
 #include <mppi/mppi_cuda.hpp>
 #include <numeric>
 
-// make an include file for the vehicle dynamics and the function stepping
-
 MPPI_Controller::MPPI_Controller()
     : rclcpp::Node("mppi_controller")
 {

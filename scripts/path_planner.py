@@ -45,7 +45,7 @@ class GlobalTrajectoryPublisher(Node):
         # subscribers
         self.odom_sub = self.create_subscription(
             Odometry,
-            "/ego_racecar/odom",  # Adjust topic name if needed
+            "/ego_racecar/odom",
             self.odom_callback,
             10,
         )
@@ -89,12 +89,9 @@ class GlobalTrajectoryPublisher(Node):
             dy = self.y - y
 
             dist_sq = dx**2 + dy**2
-            # min_idx = (np.argmin(dist_sq) + self.N - 25) % self.N
+            
             min_idx = np.argmin(dist_sq)
 
-            # Temporal resampling: find the raceline point corresponding to
-            # t = i * control_dt for each output index i, so refTrajectory[i]
-            # matches what the MPPI kernel expects at time i * dt.
             window_size = min(self.N, 500)
             idx_window = [(min_idx + j) % self.N for j in range(window_size)]
 
@@ -130,20 +127,15 @@ class GlobalTrajectoryPublisher(Node):
                 point.pose.position.x = xx[i]
                 point.pose.position.y = yy[i]
 
-                # 1. Correct Heading (Yaw)
                 qx, qy, qz, qw = tf_transformations.quaternion_from_euler(0, 0, hh[i])
                 point.pose.orientation.x = qx
                 point.pose.orientation.y = qy
                 point.pose.orientation.z = qz
                 point.pose.orientation.w = qw
 
-                # 2. Correct Speed and Yaw Rate
                 point.longitudinal_velocity_mps = vv[i]
                 point.heading_rate_rps = vv[i] * kk[i]
 
-                # 3. Handle Steering (Front Wheel Angle)
-                # If you don't have optimal steering in your CSV, set it to 0.0
-                # and let MPPI calculate the effort, or estimate it via L * kappa
                 L = 0.33  # wheel base
 
                 max_steering = np.deg2rad(30.0)  # F1TENTH typical limit
