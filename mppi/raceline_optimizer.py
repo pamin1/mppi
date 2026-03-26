@@ -2,14 +2,19 @@ from scipy import interpolate, optimize
 import pandas as pd
 import numpy as np
 import os
+import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
 
-# basic vehicle params -- needs to be tuned
+# basic vehicle params
 MU = 1.0489
 G = 9.81
-ACCEL_MAX = 9.5  # m/s^2
+ACCEL_MAX = 20.0  # m/s^2
 DECEL_MAX = 10.0  # m/s^2
-V_MAX = 7.50  # m/s
-SAFETY_BUFFER = 0.50  # meters
+V_MAX = 10.0  # m/s
+SAFETY_BUFFER = 0.80  # meters
+WHEELBASE = 0.33  # m
 
 # read out the csv, get the x and y coords
 cwd = os.getcwd()
@@ -80,7 +85,7 @@ def objective(d_offsets):
     return np.sum(kappas**2)
 
 
-# Set up box bounds on lateral offsets
+# set up box bounds on lateral offsets
 bounds = []
 for i in range(len(x_sampled) - 1):  # Exclude last point (periodic)
     lower = -w_right_sampled[i] + SAFETY_BUFFER
@@ -89,6 +94,30 @@ for i in range(len(x_sampled) - 1):  # Exclude last point (periodic)
 
 # Initial guess: start at centerline (d = 0 everywhere)
 d0 = np.zeros(len(x_sampled) - 1)
+
+# BASELINE PROFILE (centerline, no optimization)
+print("=" * 60)
+print("BASELINE PROFILE (centerline)")
+print("=" * 60)
+
+# Fit splines directly to the downsampled centerline
+spline_x_base = interpolate.CubicSpline(s, x_sampled, bc_type="periodic")
+spline_y_base = interpolate.CubicSpline(s, y_sampled, bc_type="periodic")
+
+OUTPUT_RESOLUTION = len(df["x"])
+s_dense = np.linspace(s[0], s[-1], OUTPUT_RESOLUTION)
+
+x_base = spline_x_base(s_dense)
+y_base = spline_y_base(s_dense)
+
+dx_base = spline_x_base(s_dense, 1)
+dy_base = spline_y_base(s_dense, 1)
+ddx_base = spline_x_base(s_dense, 2)
+ddy_base = spline_y_base(s_dense, 2)
+
+kappa_base = np.abs(dx_base * ddy_base - dy_base * ddx_base) / (dx_base**2 + dy_base**2) ** 1.5
+
+dist_base = np.sqrt(np.diff(x_base) ** 2 + np.diff(y_base) ** 2)
 
 print("Starting optimization...")
 print(f"Number of optimization variables: {len(d0)}")
@@ -115,11 +144,7 @@ x_optimized_coarse, y_optimized_coarse = lateral_offsets_to_xy(d_optimized)
 spline_x_opt = interpolate.CubicSpline(s, x_optimized_coarse, bc_type="periodic")
 spline_y_opt = interpolate.CubicSpline(s, y_optimized_coarse, bc_type="periodic")
 
-# Upsample to original resolution
-OUTPUT_RESOLUTION = len(df["x"])
-s_dense = np.linspace(s[0], s[-1], OUTPUT_RESOLUTION)
-
-# Evaluate splines at dense points
+# Evaluate optimized splines at dense points (s_dense already defined)
 x_optimized_smooth = spline_x_opt(s_dense)
 y_optimized_smooth = spline_y_opt(s_dense)
 
@@ -128,7 +153,7 @@ dx = spline_x_opt(s_dense, 1)
 dy = spline_y_opt(s_dense, 1)
 ddx = spline_x_opt(s_dense, 2)
 ddy = spline_y_opt(s_dense, 2)
-numerator = np.abs(dx * ddy - dy * ddx)
+numerator = (dx * ddy - dy * ddx)
 denominator = (dx**2 + dy**2) ** (3 / 2)
 kappa_values = numerator / denominator
 
@@ -142,7 +167,7 @@ print("VELOCITY PROFILE COMPUTATION")
 print("=" * 60)
 
 
-def compute_velocity_profile(kappa, distances, v_max, accel_max, decel_max, mu, g):
+def compute_velocity_profile(kappa, distances, x_pts, y_pts, v_max, accel_max, decel_max, mu, g):
     """
     Forward-backward velocity profile solver
 
@@ -194,8 +219,8 @@ def compute_velocity_profile(kappa, distances, v_max, accel_max, decel_max, mu, 
 
         # Handle wraparound (last point -> first point)
         # Distance from last point back to first
-        dx_wrap = x_optimized_smooth[0] - x_optimized_smooth[-1]
-        dy_wrap = y_optimized_smooth[0] - y_optimized_smooth[-1]
+        dx_wrap = x_pts[0] - x_pts[-1]
+        dy_wrap = y_pts[0] - y_pts[-1]
         d_wrap = np.sqrt(dx_wrap**2 + dy_wrap**2)
 
         v_brake_wrap = np.sqrt(v[0] ** 2 + 2 * decel_max * d_wrap)
@@ -203,29 +228,37 @@ def compute_velocity_profile(kappa, distances, v_max, accel_max, decel_max, mu, 
     return v
 
 
-# Compute velocity profile
-velocity_profile = compute_velocity_profile(
-    kappa_values, distances, V_MAX, ACCEL_MAX, DECEL_MAX, MU, G
+# Baseline velocity profile
+velocity_base = compute_velocity_profile(
+    kappa_base, dist_base, x_base, y_base, V_MAX, ACCEL_MAX, DECEL_MAX, MU, G
 )
 
-# Compute yaw angle from tangent vectors
+# Optimized velocity profile
+velocity_profile = compute_velocity_profile(
+    kappa_values, distances, x_optimized_smooth, y_optimized_smooth, V_MAX, ACCEL_MAX, DECEL_MAX, MU, G
+)
+
+# Yaw angles
+yaw_base = np.arctan2(dy_base, dx_base)
 yaw = np.arctan2(dy, dx)
-# yaw = np.unwrap(yaw)
 
-# Compute lap time
-lap_time = 0.0
-for i in range(len(distances)):
-    if velocity_profile[i] > 0:
-        lap_time += distances[i] / velocity_profile[i]
+# Steering angles: delta = arctan(L * kappa)
+steering_base = np.arctan(WHEELBASE * kappa_base) * np.sign(
+    dx_base * ddy_base - dy_base * ddx_base
+)
+steering_opt = np.arctan(WHEELBASE * kappa_values) * np.sign(
+    dx * ddy - dy * ddx
+)
 
-print(f"RESULTS")
+# stats
+lap_time = np.sum(distances / np.maximum(velocity_profile[:-1], 1e-6))
+print(f"\nOPTIMIZED RESULTS")
 print(f"Estimated lap time: {lap_time:.2f} seconds")
 print(f"Average speed: {s_dense[-1] / lap_time:.2f} m/s")
 print(f"Max curvature: {np.max(np.abs(kappa_values)):.4f} 1/m")
 print(f"Max speed: {np.max(velocity_profile):.2f} m/s")
 print(f"Min speed: {np.min(velocity_profile):.2f} m/s")
 
-# exporting
 final_df = pd.DataFrame(
     {
         "x": x_optimized_smooth,
@@ -235,7 +268,57 @@ final_df = pd.DataFrame(
         "kappa": kappa_values,
     }
 )
-final_df.to_csv(f"{cwd}/src/mppi/resources/{file_name}_optimized_original.csv", index=False)
+final_df.to_csv(f"{cwd}/src/mppi/resources/{file_name}_optimized.csv", index=False)
 
 print(f"\nOutput saved to: {file_name}_optimized.csv")
 print(f"Output resolution: {OUTPUT_RESOLUTION} points")
+
+# plots
+images_dir = f"{cwd}/src/mppi/resources/images"
+os.makedirs(images_dir, exist_ok=True)
+
+s_km = s_dense / 1000.0  # arc length in km for x-axis
+
+# path comparison
+fig1, ax = plt.subplots(figsize=(8, 8))
+ax.plot(x_base, y_base, color="steelblue", lw=1.2, label="Baseline (centerline)")
+ax.plot(x_optimized_smooth, y_optimized_smooth, color="orangered", lw=1.2, label="Optimized")
+ax.set_aspect("equal")
+ax.set_title(f"Path Comparison — {file_name}")
+ax.set_xlabel("x [m]")
+ax.set_ylabel("y [m]")
+ax.legend()
+fig1.tight_layout()
+fig1.savefig(f"{images_dir}/path_comparison.png", dpi=150, bbox_inches="tight")
+plt.close(fig1)
+
+# speed profile
+fig2, ax = plt.subplots(figsize=(10, 4))
+ax.plot(s_km, velocity_profile, color="orangered", lw=1.4)
+ax.set_title(f"Optimized Speed Profile — {file_name}")
+ax.set_xlabel("Arc length [km]")
+ax.set_ylabel("Speed [m/s]")
+ax.set_ylim(bottom=0)
+fig2.tight_layout()
+fig2.savefig(f"{images_dir}/optimized_speed_profile.png", dpi=150, bbox_inches="tight")
+plt.close(fig2)
+
+# speed map
+fig4, ax = plt.subplots(figsize=(8, 8))
+points = np.array([x_optimized_smooth, y_optimized_smooth]).T.reshape(-1, 1, 2)
+segments = np.concatenate([points[:-1], points[1:]], axis=1)
+norm = Normalize(vmin=velocity_profile.min(), vmax=velocity_profile.max())
+lc = LineCollection(segments, cmap="RdYlGn", norm=norm, lw=2.0)
+lc.set_array(velocity_profile[:-1])
+ax.add_collection(lc)
+ax.autoscale()
+ax.set_aspect("equal")
+fig4.colorbar(ScalarMappable(norm=norm, cmap="RdYlGn"), ax=ax, label="Speed [m/s]")
+ax.set_title(f"Optimized Speed Map — {file_name}")
+ax.set_xlabel("x [m]")
+ax.set_ylabel("y [m]")
+fig4.tight_layout()
+fig4.savefig(f"{images_dir}/optimized_speed_map.png", dpi=150, bbox_inches="tight")
+plt.close(fig4)
+
+print(f"\nPlots saved to: {images_dir}/")
