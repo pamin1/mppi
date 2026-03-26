@@ -95,6 +95,17 @@ def generate_launch_description():
     )
 
     # ==========================================================================
+    # 4. LAP LOGGER
+    # ==========================================================================
+
+    lap_logger = Node(
+        package="mppi",
+        executable="lap_logger.py",
+        name="lap_logger",
+        output="screen",
+    )
+
+    # ==========================================================================
     # LAUNCH DESCRIPTION
     # ==========================================================================
 
@@ -107,6 +118,7 @@ def generate_launch_description():
             control_freq_arg,
             # Nodes
             trajectory_publisher,  # Path planner
-            mppi_controller,  # MPPI controller
+            mppi_controller,       # MPPI controller
+            lap_logger,            # Lap data logger
         ]
     )
