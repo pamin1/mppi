@@ -1,9 +1,13 @@
 tracks:
-  - name: Spielberg_map
-    map_path: /home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/Spielberg_map
-    start_pose: [0.0, 0.0, 0.0]
+  # - name: Spielberg_map
+  #   map_path: /home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/Spielberg_map
+  #   start_pose: [0.0, 0.0, 0.0]
 
-  # Add more tracks here, e.g.:
+  # # Add more tracks here, e.g.:
   - name: track_01
     map_path: /home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/track_01
     start_pose: [-11.66312026977539, -41.36701202392578, 0.0]
+
+  - name: track_02
+    map_path: /home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/track_02
+    start_pose: [-12.227761268615723, -39.125423431396484, 0.0]
