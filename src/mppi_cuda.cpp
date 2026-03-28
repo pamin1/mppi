@@ -16,6 +16,11 @@ MPPI_Controller::MPPI_Controller()
     this->declare_parameter("mppi.accel_dist", 2.0);
     this->declare_parameter("mppi.steer_dist", 0.3);
 
+    // vehicle limits (must match raceline_optimizer to avoid infeasible trajectories)
+    this->declare_parameter("vehicle.v_max",     10.0);
+    this->declare_parameter("vehicle.accel_max", 20.0);
+    this->declare_parameter("vehicle.decel_max", 10.0);
+
     // state tracking weights
     this->declare_parameter("cost_weights.q_x", 1.0);
     this->declare_parameter("cost_weights.q_y", 1.0);
@@ -105,6 +110,10 @@ void MPPI_Controller::loadParameters()
     sigmaAcceleration = this->get_parameter("mppi.accel_dist").as_double();
     sigmaSteering = this->get_parameter("mppi.steer_dist").as_double();
 
+    params.maxVelocity    = static_cast<float>(this->get_parameter("vehicle.v_max").as_double());
+    params.maxAcceleration= static_cast<float>(this->get_parameter("vehicle.accel_max").as_double());
+    params.minAcceleration= -static_cast<float>(this->get_parameter("vehicle.decel_max").as_double());
+
     weights.qX = this->get_parameter("cost_weights.q_x").as_double();
     weights.qY = this->get_parameter("cost_weights.q_y").as_double();
     weights.qHeading = this->get_parameter("cost_weights.q_heading").as_double();
@@ -129,6 +138,10 @@ void MPPI_Controller::loadParameters()
     RCLCPP_INFO(this->get_logger(), "  alpha: %.3f", alpha);
     RCLCPP_INFO(this->get_logger(), "  sigma_accel: %.3f", sigmaAcceleration);
     RCLCPP_INFO(this->get_logger(), "  sigma_steering: %.3f", sigmaSteering);
+    RCLCPP_INFO(this->get_logger(), "Vehicle limits:");
+    RCLCPP_INFO(this->get_logger(), "  v_max: %.2f m/s", params.maxVelocity);
+    RCLCPP_INFO(this->get_logger(), "  accel_max: %.2f m/s^2", params.maxAcceleration);
+    RCLCPP_INFO(this->get_logger(), "  decel_max: %.2f m/s^2", -params.minAcceleration);
     RCLCPP_INFO(this->get_logger(), "Cost weights:");
     RCLCPP_INFO(this->get_logger(), "  q_x: %.3f", weights.qX);
     RCLCPP_INFO(this->get_logger(), "  q_y: %.3f", weights.qY);
