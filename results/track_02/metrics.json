@@ -1,0 +1,8 @@
+{
+  "status": "timeout",
+  "collision": false,
+  "elapsed_seconds": 144.98,
+  "mean_cte_m": 0.1278,
+  "max_cte_m": 0.1278,
+  "track": "track_02"
+}

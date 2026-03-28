@@ -1,0 +1,8 @@
+{
+  "status": "laps_complete",
+  "collision": false,
+  "elapsed_seconds": 56.32,
+  "mean_cte_m": 0.1713,
+  "max_cte_m": 0.5481,
+  "track": "track_01"
+}

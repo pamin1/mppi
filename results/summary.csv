@@ -1,0 +1,2 @@
+track_name,status,mean_cte_m,max_cte_m,best_lap_time_s,lap_times,collision,elapsed_seconds
+track_02,timeout,0.1278,0.1278,,[],False,144.98

@@ -540,7 +540,15 @@ def run_track(track: dict, batch_cfg: dict) -> dict:
     # 8. Collect run log and save metrics
     collect_run_log(results_dir)
 
+    metrics = compute_metrics(results_dir, status, elapsed)
+    metrics["track"] = name
+
+    metrics_path = results_dir / "metrics.json"
+    with open(metrics_path, "w") as f:
+        json.dump(metrics, f, indent=2)
     log.info(f"  {name}: status={status}  elapsed={elapsed:.1f} s")
+
+    return metrics
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -606,9 +614,14 @@ def main() -> None:
         f"timeout={batch_cfg.get('timeout_seconds')} s"
     )
 
+    all_metrics = []
     for t in tracks:
-        run_track(t, batch_cfg)
-    
+        metrics = run_track(t, batch_cfg)
+        if metrics:
+            all_metrics.append(metrics)
+
+    generate_summary(all_metrics)
+
     log.info(f"\n{'='*60}")
     log.info("BATCH COMPLETE")
     log.info(f"Results: {RESULTS_BASE}")
