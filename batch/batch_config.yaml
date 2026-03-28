@@ -1,0 +1,8 @@
+batch:
+  target_laps: 2
+  timeout_seconds: 130
+  collision_threshold_m: 0.15
+  collision_consecutive_readings: 1
+  warmup_laps: 1
+  control_dt: 0.02
+  min_lap_distance: 30.0

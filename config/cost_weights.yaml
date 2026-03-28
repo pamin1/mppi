@@ -1,4 +1,4 @@
-mppi_controller:
+mppi_controller_node:
   ros__parameters:
     mppi:
       samples: 10000
@@ -10,8 +10,8 @@ mppi_controller:
       alpha: 1.0
     
     cost_weights:
-      q_x: 2.0
-      q_y: 2.0
+      q_x: 2.5
+      q_y: 2.5
       q_heading: 0.0
       q_vx: 1.0
       q_vy: 1.0

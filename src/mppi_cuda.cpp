@@ -221,7 +221,7 @@ void MPPI_Controller::updateControl()
     // safety check for data available
     if (!odom || !traj)
     {
-        RCLCPP_INFO(this->get_logger(), "Waiting for odometry or trajectory");
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "Waiting for odometry or trajectory");
         return;
     }
 

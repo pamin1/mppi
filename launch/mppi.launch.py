@@ -41,8 +41,8 @@ def generate_launch_description():
 
     trajectory_file_arg = DeclareLaunchArgument(
         "trajectory",
-        default_value="Spielberg_map_optimized.csv",
-        description="Name of trajectory CSV file",
+        default_value="Spielberg_map_optimized",
+        description="Trajectory CSV stem in share/mppi/resources/ (no .csv extension)",
     )
 
     use_rviz_arg = DeclareLaunchArgument(
@@ -63,16 +63,12 @@ def generate_launch_description():
     # 2. GLOBAL TRAJECTORY PUBLISHER (PATH PLANNER)
     # ==========================================================================
 
-    # Build trajectory file path
-    trajectory_path = PathJoinSubstitution(
-        [FindPackageShare("mppi"), "resources", trajectory_file]
-    )
-
     trajectory_publisher = Node(
         package="mppi",
         executable="path_planner.py",
         name="path_planner",
         output="screen",
+        parameters=[{"trajectory_file": trajectory_file}],
     )
 
     # ==========================================================================
@@ -95,14 +91,21 @@ def generate_launch_description():
     )
 
     # ==========================================================================
-    # 4. LAP LOGGER
+    # 4. MONITOR NODE
     # ==========================================================================
 
-    lap_logger = Node(
+    monitor = Node(
         package="mppi",
-        executable="lap_logger.py",
-        name="lap_logger",
+        executable="monitor_node.py",
+        name="monitor_node",
         output="screen",
+        parameters=[{
+            "target_laps": 1,
+            "timeout_seconds": 300.0,
+            "collision_threshold_m": 0.12,
+            "collision_consecutive_readings": 3,
+            "min_lap_distance": 30.0,
+        }],
     )
 
     # ==========================================================================
@@ -119,6 +122,6 @@ def generate_launch_description():
             # Nodes
             trajectory_publisher,  # Path planner
             mppi_controller,       # MPPI controller
-            lap_logger,            # Lap data logger
+            monitor,               # Monitor / metrics logger
         ]
     )
