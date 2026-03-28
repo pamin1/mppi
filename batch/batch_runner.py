@@ -191,7 +191,8 @@ def run_centerline_extraction(track: dict, results_dir: Path) -> Path:
 
 # ── Stage 2: Raceline optimization ────────────────────────────────────────────
 
-def run_raceline_optimization(track: dict, baseline_csv: Path, results_dir: Path) -> Path:
+def run_raceline_optimization(track: dict, baseline_csv: Path, results_dir: Path,
+                              batch_cfg: dict | None = None) -> Path:
     """
     Call raceline_optimizer.py as a subprocess.
 
@@ -201,17 +202,24 @@ def run_raceline_optimization(track: dict, baseline_csv: Path, results_dir: Path
     """
     map_name      = Path(track["map_path"]).name
     optimized_csv = results_dir / "optimized.csv"
-    
+
     figures_dir = results_dir / "figures"
     figures_dir.mkdir(exist_ok=True)
 
+    cfg = batch_cfg or {}
     env = os.environ.copy()
     env.update({
-        "BATCH_FILE_NAME":   map_name,
-        "BATCH_INPUT_CSV":   str(baseline_csv),
-        "BATCH_OUTPUT_CSV":  str(optimized_csv),
-        "BATCH_FIGURES_DIR": str(figures_dir),
-        "MPLBACKEND":        "Agg",
+        "BATCH_FILE_NAME":     map_name,
+        "BATCH_INPUT_CSV":     str(baseline_csv),
+        "BATCH_OUTPUT_CSV":    str(optimized_csv),
+        "BATCH_FIGURES_DIR":   str(figures_dir),
+        "MPLBACKEND":          "Agg",
+        "BATCH_V_MAX":         str(cfg.get("v_max",          10.0)),
+        "BATCH_ACCEL_MAX":     str(cfg.get("accel_max",      20.0)),
+        "BATCH_DECEL_MAX":     str(cfg.get("decel_max",      10.0)),
+        "BATCH_MU":            str(cfg.get("mu",             1.0489)),
+        "BATCH_SAFETY_BUFFER": str(cfg.get("safety_buffer",  0.80)),
+        "BATCH_WHEELBASE":     str(cfg.get("wheelbase",      0.33)),
     })
 
     log.info(f"  Optimizing raceline for {map_name}...")
@@ -485,7 +493,7 @@ def compute_metrics(results_dir: Path, status: str, elapsed: float) -> dict:
 
 # ── Per-track pipeline ────────────────────────────────────────────────────────
 
-def run_track(track: dict, batch_cfg: dict) -> dict:
+def run_track(track: dict, batch_cfg: dict, skip_preprocessing: bool = False) -> dict:
     subprocess.run(
         "pkill -9 -f 'path_planner.py' ; "
         "pkill -9 -f 'mppi_controller_node' ; "
@@ -509,11 +517,20 @@ def run_track(track: dict, batch_cfg: dict) -> dict:
     t_start  = time.monotonic()
 
     try:
-        # 1. Centerline extraction
-        baseline_csv = run_centerline_extraction(track, results_dir)
+        if skip_preprocessing:
+            # Raceline already computed — just re-stage it
+            optimized_csv = results_dir / "optimized.csv"
+            if not optimized_csv.exists():
+                raise FileNotFoundError(
+                    f"skip_preprocessing=True but optimized CSV not found: {optimized_csv}"
+                )
+            log.info(f"  Skipping preprocessing, reusing {optimized_csv}")
+        else:
+            # 1. Centerline extraction
+            baseline_csv = run_centerline_extraction(track, results_dir)
 
-        # 2. Raceline optimization
-        optimized_csv = run_raceline_optimization(track, baseline_csv, results_dir)
+            # 2. Raceline optimization
+            optimized_csv = run_raceline_optimization(track, baseline_csv, results_dir, batch_cfg)
 
         # 3. Stage optimized CSV into ROS2 package resource dirs
         _stage_optimized_csv(track, optimized_csv)

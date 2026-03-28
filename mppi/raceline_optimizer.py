@@ -7,14 +7,14 @@ from matplotlib.collections import LineCollection
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 
-# basic vehicle params
-MU = 1.0489
-G = 9.81
-ACCEL_MAX = 20.0  # m/s^2
-DECEL_MAX = 10.0  # m/s^2
-V_MAX = 10.0  # m/s
-SAFETY_BUFFER = 0.80  # meters
-WHEELBASE = 0.33  # m
+# basic vehicle params (all overridable via environment variables)
+MU           = float(os.environ.get("BATCH_MU",             "1.0489"))
+G            = float(os.environ.get("BATCH_G",              "9.81"))
+ACCEL_MAX    = float(os.environ.get("BATCH_ACCEL_MAX",      "20.0"))   # m/s^2
+DECEL_MAX    = float(os.environ.get("BATCH_DECEL_MAX",      "10.0"))   # m/s^2
+V_MAX        = float(os.environ.get("BATCH_V_MAX",          "10.0"))   # m/s
+SAFETY_BUFFER= float(os.environ.get("BATCH_SAFETY_BUFFER",  "0.80"))   # meters
+WHEELBASE    = float(os.environ.get("BATCH_WHEELBASE",      "0.33"))   # m
 
 # read out the csv, get the x and y coords
 cwd = os.getcwd()
