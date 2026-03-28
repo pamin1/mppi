@@ -42,7 +42,14 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 # Lazy import — batch_runner is in the same directory
 sys.path.insert(0, str(BATCH_DIR))
-from batch_runner import run_track, load_yaml  # noqa: E402
+from batch_runner import (  # noqa: E402
+    run_track,
+    load_yaml,
+    run_centerline_extraction,
+    run_raceline_optimization,
+    _stage_optimized_csv,
+    RESULTS_BASE,
+)
 
 
 # ── Parameter space ────────────────────────────────────────────────────────────
@@ -123,6 +130,32 @@ def compute_objective(all_metrics: list, lambda_time: float = 0.1) -> float:
 
 # ── Trial function ─────────────────────────────────────────────────────────────
 
+def preprocess_tracks(tracks: list, batch_cfg: dict) -> None:
+    """
+    Run centerline extraction and raceline optimization for every track once.
+    Results are written to results/{track_name}/optimized.csv and staged into
+    the ROS2 package directories.  Subsequent Optuna trials skip this step.
+    """
+    log.info("Pre-processing tracks (raceline generation, runs once)...")
+    for track in tracks:
+        name        = track["name"]
+        results_dir = RESULTS_BASE / name
+        results_dir.mkdir(parents=True, exist_ok=True)
+        optimized_csv = results_dir / "optimized.csv"
+
+        if optimized_csv.exists():
+            log.info(f"  [{name}] optimized.csv already exists — skipping")
+            _stage_optimized_csv(track, optimized_csv)
+            continue
+
+        log.info(f"  [{name}] running centerline extraction + raceline optimization")
+        baseline_csv  = run_centerline_extraction(track, results_dir)
+        optimized_csv = run_raceline_optimization(track, baseline_csv, results_dir, batch_cfg)
+        _stage_optimized_csv(track, optimized_csv)
+
+    log.info("Pre-processing complete.")
+
+
 def make_objective(tracks: list, batch_cfg: dict, lambda_time: float = 0.1):
     """Factory that closes over tracks/batch_cfg and returns the Optuna objective."""
 
@@ -143,7 +176,7 @@ def make_objective(tracks: list, batch_cfg: dict, lambda_time: float = 0.1):
 
         all_metrics: list[dict] = []
         for i, track in enumerate(tracks):
-            metrics = run_track(track, batch_cfg)
+            metrics = run_track(track, batch_cfg, skip_preprocessing=True)
             if metrics is None:
                 metrics = {"collision": True, "track": track["name"]}
             all_metrics.append(metrics)
@@ -235,6 +268,10 @@ def main() -> None:
             n_warmup_steps=1,
         ),
     )
+
+    # Run centerline extraction + raceline optimization once for all tracks.
+    # Each Optuna trial reuses the results — only cost weights change between trials.
+    preprocess_tracks(tracks, batch_cfg)
 
     log.info(
         f"Starting optimization: {args.n_trials} trials, "

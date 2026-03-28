@@ -6,3 +6,12 @@ batch:
   warmup_laps: 1
   control_dt: 0.02
   min_lap_distance: 30.0
+
+  # Vehicle limits — must match mppi_cuda.cpp vehicle.* ROS2 params
+  # and are forwarded to raceline_optimizer.py as BATCH_* env vars.
+  v_max: 10.0        # m/s
+  accel_max: 20.0    # m/s^2
+  decel_max: 15.0    # m/s^2
+  mu: 1.0489
+  safety_buffer: 0.80  # meters from track edge
+  wheelbase: 0.33      # meters
