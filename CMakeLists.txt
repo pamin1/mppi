@@ -89,7 +89,7 @@ install(DIRECTORY include/
 
 install(PROGRAMS
   scripts/path_planner.py
-  scripts/lap_logger.py
+  scripts/monitor_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
