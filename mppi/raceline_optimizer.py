@@ -18,9 +18,11 @@ WHEELBASE = 0.33  # m
 
 # read out the csv, get the x and y coords
 cwd = os.getcwd()
-file_name = "Spielberg_map"
+file_name = os.environ.get("BATCH_FILE_NAME", "Spielberg_map")
 
-df = pd.read_csv(f"{cwd}/src/mppi/resources/{file_name}.csv")
+_default_input = f"{cwd}/src/mppi/resources/{file_name}.csv"
+_input_csv = os.environ.get("BATCH_INPUT_CSV", _default_input)
+df = pd.read_csv(_input_csv)
 
 # downsampling the positions to speed up the computations
 DOWNSAMPLE_FACTOR = 20
@@ -268,21 +270,24 @@ final_df = pd.DataFrame(
         "kappa": kappa_values,
     }
 )
-final_df.to_csv(f"{cwd}/src/mppi/resources/{file_name}_optimized.csv", index=False)
+_default_output = f"{cwd}/src/mppi/resources/{file_name}_optimized.csv"
+_output_csv = os.environ.get("BATCH_OUTPUT_CSV", _default_output)
+final_df.to_csv(_output_csv, index=False)
 
 print(f"\nOutput saved to: {file_name}_optimized.csv")
 print(f"Output resolution: {OUTPUT_RESOLUTION} points")
 
 # plots
-images_dir = f"{cwd}/src/mppi/resources/images"
+_figures_dir = os.environ.get("BATCH_FIGURES_DIR", "")
+images_dir   = _figures_dir if _figures_dir else f"{cwd}/src/mppi/resources/images"
 os.makedirs(images_dir, exist_ok=True)
 
 s_km = s_dense / 1000.0  # arc length in km for x-axis
 
-# path comparison
+# path comparison (always saved)
 fig1, ax = plt.subplots(figsize=(8, 8))
 ax.plot(x_base, y_base, color="steelblue", lw=1.2, label="Baseline (centerline)")
-ax.plot(x_optimized_smooth, y_optimized_smooth, color="orangered", lw=1.2, label="Optimized")
+ax.plot(x_optimized_smooth, y_optimized_smooth, color="orangered", lw=1.2, label="Optimized raceline")
 ax.set_aspect("equal")
 ax.set_title(f"Path Comparison — {file_name}")
 ax.set_xlabel("x [m]")
@@ -292,33 +297,34 @@ fig1.tight_layout()
 fig1.savefig(f"{images_dir}/path_comparison.png", dpi=150, bbox_inches="tight")
 plt.close(fig1)
 
-# speed profile
-fig2, ax = plt.subplots(figsize=(10, 4))
-ax.plot(s_km, velocity_profile, color="orangered", lw=1.4)
-ax.set_title(f"Optimized Speed Profile — {file_name}")
-ax.set_xlabel("Arc length [km]")
-ax.set_ylabel("Speed [m/s]")
-ax.set_ylim(bottom=0)
-fig2.tight_layout()
-fig2.savefig(f"{images_dir}/optimized_speed_profile.png", dpi=150, bbox_inches="tight")
-plt.close(fig2)
+if not _figures_dir:
+    # speed profile — standalone only
+    fig2, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(s_km, velocity_profile, color="orangered", lw=1.4)
+    ax.set_title(f"Optimized Speed Profile — {file_name}")
+    ax.set_xlabel("Arc length [km]")
+    ax.set_ylabel("Speed [m/s]")
+    ax.set_ylim(bottom=0)
+    fig2.tight_layout()
+    fig2.savefig(f"{images_dir}/optimized_speed_profile.png", dpi=150, bbox_inches="tight")
+    plt.close(fig2)
 
-# speed map
-fig4, ax = plt.subplots(figsize=(8, 8))
-points = np.array([x_optimized_smooth, y_optimized_smooth]).T.reshape(-1, 1, 2)
-segments = np.concatenate([points[:-1], points[1:]], axis=1)
-norm = Normalize(vmin=velocity_profile.min(), vmax=velocity_profile.max())
-lc = LineCollection(segments, cmap="RdYlGn", norm=norm, lw=2.0)
-lc.set_array(velocity_profile[:-1])
-ax.add_collection(lc)
-ax.autoscale()
-ax.set_aspect("equal")
-fig4.colorbar(ScalarMappable(norm=norm, cmap="RdYlGn"), ax=ax, label="Speed [m/s]")
-ax.set_title(f"Optimized Speed Map — {file_name}")
-ax.set_xlabel("x [m]")
-ax.set_ylabel("y [m]")
-fig4.tight_layout()
-fig4.savefig(f"{images_dir}/optimized_speed_map.png", dpi=150, bbox_inches="tight")
-plt.close(fig4)
+    # speed map — standalone only
+    fig4, ax = plt.subplots(figsize=(8, 8))
+    points = np.array([x_optimized_smooth, y_optimized_smooth]).T.reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    norm = Normalize(vmin=velocity_profile.min(), vmax=velocity_profile.max())
+    lc = LineCollection(segments, cmap="RdYlGn", norm=norm, lw=2.0)
+    lc.set_array(velocity_profile[:-1])
+    ax.add_collection(lc)
+    ax.autoscale()
+    ax.set_aspect("equal")
+    fig4.colorbar(ScalarMappable(norm=norm, cmap="RdYlGn"), ax=ax, label="Speed [m/s]")
+    ax.set_title(f"Optimized Speed Map — {file_name}")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    fig4.tight_layout()
+    fig4.savefig(f"{images_dir}/optimized_speed_map.png", dpi=150, bbox_inches="tight")
+    plt.close(fig4)
 
 print(f"\nPlots saved to: {images_dir}/")

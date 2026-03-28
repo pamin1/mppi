@@ -61,9 +61,9 @@ def _parse_args() -> int:
     )
     args = parser.parse_args()
 
-    existing = sorted(glob.glob(os.path.join(logs_dir, "lap_*.csv")))
+    existing = sorted(glob.glob(os.path.join(logs_dir, "run_*.csv")))
     if not existing:
-        print(f"ERROR: no lap CSVs found in {logs_dir}/", file=sys.stderr)
+        print(f"ERROR: no run CSVs found in {logs_dir}/", file=sys.stderr)
         sys.exit(1)
 
     if args.lap is not None:
@@ -72,15 +72,15 @@ def _parse_args() -> int:
     # Default: latest by number
     nums = []
     for p in existing:
-        m = re.search(r"lap_(\d+)\.csv$", p)
+        m = re.search(r"run_(\d+)\.csv$", p)
         if m:
             nums.append(int(m.group(1)))
 
     if not nums:
         names = [os.path.basename(p) for p in existing]
         print(
-            f"ERROR: found lap CSVs but none follow the lap_NNN.csv naming scheme: {names}\n"
-            "Re-run the simulator with the updated lap_logger to produce an enumerated log.",
+            f"ERROR: found CSVs but none follow the run_NNN.csv naming scheme: {names}\n"
+            "Re-run the simulator with the updated monitor_node to produce an enumerated log.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -118,7 +118,7 @@ def load_optimizer_profile():
 
 # ── Load lap log ──────────────────────────────────────────────────────────────
 def load_log_profile(lap_num: int):
-    log_path = os.path.join(logs_dir, f"lap_{lap_num:03d}.csv")
+    log_path = os.path.join(logs_dir, f"run_{lap_num:03d}.csv")
     if not os.path.exists(log_path):
         print(f"ERROR: {log_path} not found.", file=sys.stderr)
         sys.exit(1)
@@ -127,11 +127,11 @@ def load_log_profile(lap_num: int):
     log = pd.read_csv(log_path)
 
     t     = log["timestamp_s"].to_numpy()
-    vx    = log["speed_mps"].to_numpy()
-    steer = log["steering_angle_rad"].to_numpy()
     x     = log["x"].to_numpy()
     y     = log["y"].to_numpy()
     yaw   = log["yaw_rad"].to_numpy()
+    vx    = log["speed_mps"].to_numpy()
+    steer = log["steering_angle_rad"].to_numpy()
 
     # Approximate arc length by integrating speed over time
     dt   = np.diff(t)
@@ -147,7 +147,7 @@ def save_comparison(lap_num: int) -> None:
     frac_opt, vx_opt, steer_opt, x_opt, y_opt, yaw_opt = load_optimizer_profile()
     frac_log, vx_log, steer_log, x_log, y_log, yaw_log = load_log_profile(lap_num)
 
-    lap_tag    = f"lap_{lap_num:03d}"
+    lap_tag    = f"run_{lap_num:03d}"
     images_dir = os.path.join(resources, "images", lap_tag)
     os.makedirs(images_dir, exist_ok=True)
 
