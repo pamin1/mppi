@@ -1,8 +1,11 @@
 {
-  "status": "timeout",
-  "collision": false,
-  "elapsed_seconds": 144.98,
-  "mean_cte_m": 0.1278,
-  "max_cte_m": 0.1278,
+  "status": "collision",
+  "collision": true,
+  "mean_cte_m": 0.1855,
+  "max_cte_m": 0.7547,
+  "lap_times": [],
+  "best_lap_time_s": null,
+  "total_distance_m": 141.68,
+  "elapsed_seconds": 24.65,
   "track": "track_02"
 }

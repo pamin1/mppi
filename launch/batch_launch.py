@@ -55,6 +55,10 @@ def _declare_args():
         DeclareLaunchArgument("min_lap_distance",               default_value="30.0"),
         DeclareLaunchArgument("rerun_output",                   default_value="",
                               description="Absolute path for the .rrd recording file"),
+        DeclareLaunchArgument("log_output",                     default_value="",
+                              description="Absolute path for the run_log.csv written by monitor_node"),
+        DeclareLaunchArgument("metrics_output_path",            default_value="",
+                              description="Absolute path for the metrics.json written by monitor_node"),
     ]
 
 
@@ -73,7 +77,9 @@ def _launch_setup(context, *args, **kwargs):
     coll_thresh     = LaunchConfiguration("collision_threshold_m").perform(context)
     coll_n          = LaunchConfiguration("collision_consecutive_readings").perform(context)
     min_lap         = LaunchConfiguration("min_lap_distance").perform(context)
-    rerun_output    = LaunchConfiguration("rerun_output").perform(context)
+    rerun_output        = LaunchConfiguration("rerun_output").perform(context)
+    log_output          = LaunchConfiguration("log_output").perform(context)
+    metrics_output_path = LaunchConfiguration("metrics_output_path").perform(context)
 
     # Read sim config to get map_path (needed by map_server)
     with open(sim_config_path) as f:
@@ -170,6 +176,8 @@ def _launch_setup(context, *args, **kwargs):
             "collision_consecutive_readings": int(coll_n),
             "min_lap_distance":               float(min_lap),
             "rerun_output":                   rerun_output,
+            "log_output":                     log_output,
+            "metrics_output_path":            metrics_output_path,
         }],
     )
 
@@ -198,7 +206,7 @@ def _launch_setup(context, *args, **kwargs):
         path_planner_node,
         mppi_controller_node,
         monitor_node,
-        # rviz_node,
+        rviz_node,
         teardown_on_monitor_exit,
     ]
 

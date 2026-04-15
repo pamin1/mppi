@@ -26,6 +26,7 @@ CSV output (auto-enumerated): resources/logs/run_NNN.csv
 
 import csv
 import glob
+import json
 import math
 import os
 import re
@@ -75,6 +76,8 @@ class MonitorNode(Node):
         self.declare_parameter("collision_consecutive_readings", 3)
         self.declare_parameter("min_lap_distance", 30.0)
         self.declare_parameter("rerun_output", "")
+        self.declare_parameter("log_output", "")
+        self.declare_parameter("metrics_output_path", "")
 
         self._target_laps      = self.get_parameter("target_laps").value
         self._timeout_s        = self.get_parameter("timeout_seconds").value
@@ -82,15 +85,23 @@ class MonitorNode(Node):
         self._coll_n           = self.get_parameter("collision_consecutive_readings").value
         self._min_lap_dist     = self.get_parameter("min_lap_distance").value
         self._rerun_output     = self.get_parameter("rerun_output").value
+        self._log_output       = self.get_parameter("log_output").value
+        self._metrics_output   = self.get_parameter("metrics_output_path").value
 
         # ── Output file ──────────────────────────────────────────
-        logs_dir = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "resources", "logs")
-        )
-        os.makedirs(logs_dir, exist_ok=True)
+        if self._log_output:
+            # Explicit path provided by batch_runner — write directly there.
+            self._csv_path = self._log_output
+            os.makedirs(os.path.dirname(self._csv_path), exist_ok=True)
+        else:
+            # Fallback: auto-numbered file next to the script's resources dir.
+            logs_dir = os.path.normpath(
+                os.path.join(os.path.dirname(__file__), "..", "resources", "logs")
+            )
+            os.makedirs(logs_dir, exist_ok=True)
+            run_num = _next_run_number(logs_dir)
+            self._csv_path = os.path.join(logs_dir, f"run_{run_num:03d}.csv")
 
-        run_num = _next_run_number(logs_dir)
-        self._csv_path = os.path.join(logs_dir, f"run_{run_num:03d}.csv")
         self._csv_file = open(self._csv_path, "w", newline="")
         self._csv_writer = csv.writer(self._csv_file)
         self._csv_writer.writerow([
@@ -98,7 +109,7 @@ class MonitorNode(Node):
             "speed_mps", "steering_angle_rad", "cross_track_error_m",
         ])
 
-        self.get_logger().info(f"Monitor node started — run {run_num:03d}, output: {self._csv_path}")
+        self.get_logger().info(f"Monitor node started — output: {self._csv_path}")
 
         # ── Vehicle state cache ───────────────────────────────────
         self._x: float = 0.0
@@ -126,6 +137,13 @@ class MonitorNode(Node):
         self._lap_count: int = 0
         self._lap_start_time: float | None = None
 
+        # ── CTE tracking ─────────────────────────────────────────
+        self._cte_values: list = []
+        self._total_distance: float = 0.0
+
+        # ── Lap times list ────────────────────────────────────────
+        self._lap_times: list = []
+
         # ── Collision detection ───────────────────────────────────
         self._coll_streak: int = 0
 
@@ -134,8 +152,9 @@ class MonitorNode(Node):
         self._final_status: str = ""
 
         # ── Rerun ─────────────────────────────────────────────────
-        rr.init("mppi_monitor")
+        rr.init("mppi_monitor", recording_id=self._csv_path)
         if self._rerun_output:
+            os.makedirs(os.path.dirname(self._rerun_output), exist_ok=True)
             rr.save(self._rerun_output)
             self.get_logger().info(f"Rerun recording → {self._rerun_output}")
         else:
@@ -241,6 +260,7 @@ class MonitorNode(Node):
         if self._armed and self._prev_dot < 0.0 and dot >= 0.0:
             lap_time = t - self._lap_start_time
             self._lap_count += 1
+            self._lap_times.append(round(lap_time, 4))
             self.get_logger().info(
                 f"Lap {self._lap_count} complete — {lap_time:.2f} s"
             )
@@ -261,6 +281,8 @@ class MonitorNode(Node):
         if self._ref_xy is not None:
             diffs = self._ref_xy - np.array([x, y])
             cte   = float(np.min(np.hypot(diffs[:, 0], diffs[:, 1])))
+        self._cte_values.append(cte)
+        self._total_distance += step
 
         # ── Write CSV row ─────────────────────────────────────────
         self._csv_writer.writerow([
@@ -289,6 +311,32 @@ class MonitorNode(Node):
         self._final_status = status
         self._csv_file.flush()
         self._csv_file.close()
+
+        # ── Write metrics JSON ────────────────────────────────────
+        metrics: dict = {
+            "status":    status,
+            "collision": status == "collision",
+        }
+        if self._cte_values:
+            metrics["mean_cte_m"] = round(float(np.mean(self._cte_values)), 4)
+            metrics["max_cte_m"]  = round(float(np.max(self._cte_values)),  4)
+        else:
+            metrics["mean_cte_m"] = None
+            metrics["max_cte_m"]  = None
+
+        metrics["lap_times"]       = self._lap_times
+        metrics["best_lap_time_s"] = round(min(self._lap_times), 4) if self._lap_times else None
+        metrics["total_distance_m"] = round(self._total_distance, 2)
+
+        metrics_path = self._metrics_output or str(self._csv_path).replace(".csv", "_metrics.json")
+        try:
+            os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+            with open(metrics_path, "w") as f:
+                json.dump(metrics, f, indent=2)
+            self.get_logger().info(f"Metrics written → {metrics_path}")
+        except Exception as exc:
+            self.get_logger().error(f"Failed to write metrics: {exc}")
+
         self.get_logger().info(f"Run ended ({status}) — log saved to {self._csv_path}")
         # Publish status now, then again after a short delay to guarantee delivery
         # before the node shuts down.  Raising SystemExit immediately would kill

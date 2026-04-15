@@ -56,13 +56,13 @@ from batch_runner import (  # noqa: E402
 
 def suggest_params(trial: optuna.Trial) -> dict:
     return {
-        "steer_dist":      trial.suggest_float("steer_dist",      0.01,   0.2,  log=True),
-        "accel_dist":      trial.suggest_float("accel_dist",      0.1,    3.0),
-        "q_xy":            trial.suggest_float("q_xy",            0.5,   20.0,  log=True),
-        "q_vx":            trial.suggest_float("q_vx",            0.01,   5.0,  log=True),
-        "r_accel":         trial.suggest_float("r_accel",         0.0001, 1.0,  log=True),
-        "r_steering":      trial.suggest_float("r_steering",      0.001,  2.0,  log=True),
-        "r_steering_rate": trial.suggest_float("r_steering_rate", 0.001,  5.0,  log=True),
+        "steer_dist":      0.05,
+        "accel_dist":      1.0,
+        "q_xy":            trial.suggest_float("q_xy", 0.5, 15.0, log=True),
+        "q_vx":            trial.suggest_float("q_vx", 0.1, 5.0, log=True),
+        "r_accel":         trial.suggest_float("r_accel", 0.0001, 0.5, log=True),
+        "r_steering":      trial.suggest_float("r_steering", 0.001, 1.0, log=True),
+        "r_steering_rate": trial.suggest_float("r_steering_rate", 0.001, 2.0, log=True),
     }
 
 
@@ -70,10 +70,10 @@ def suggest_params(trial: optuna.Trial) -> dict:
 
 def build_cost_weights_yaml(params: dict) -> dict:
     return {
-        "mppi_controller": {
+        "mppi_controller_node": {
             "ros__parameters": {
                 "mppi": {
-                    "samples":           8192,
+                    "samples":           10000,
                     "control_frequency": 50,
                     "horizon":           30,
                     "accel_dist":        params["accel_dist"],
@@ -86,12 +86,16 @@ def build_cost_weights_yaml(params: dict) -> dict:
                     "q_y":            params["q_xy"],
                     "q_heading":      0.0,
                     "q_vx":           params["q_vx"],
-                    "q_vy":           0.0,
+                    "q_vy":           1.0,
                     "q_yaw_rate":     0.0,
                     "r_accel":        params["r_accel"],
                     "r_steering":     params["r_steering"],
                     "r_steering_rate": params["r_steering_rate"],
                 },
+
+                "vehicle": {
+                    "v_max": 15.0,
+                } 
             }
         }
     }
@@ -109,23 +113,33 @@ def stage_config(config_path: Path) -> None:
 
 def compute_objective(all_metrics: list, lambda_time: float = 0.1) -> float:
     """
-    Returns infinity if any track collided.
-    Otherwise: mean_cte + lambda_time * mean_lap_time.
-    lambda_time=0.1 keeps CTE dominant.
+    Accumulate across ALL tracks (never return early on first collision).
+    Collision penalty: 100.0 per colliding track (additive).
+    For non-colliding tracks: accumulate mean_cte and lap time.
+    Final score = mean_cte + lambda_time * mean_lap_time + 100.0 * num_collisions.
+    If no CTE data exists at all, return 100.0 * len(tracks) as a high-penalty signal.
+    lambda_time=0.1 keeps CTE dominant over lap time.
     """
+    cte_values: list = []
+    lap_values: list = []
+    collision_count = 0
+
     for m in all_metrics:
         if m.get("collision", False):
-            return float("inf")
-
-    cte_values = [m["mean_cte_m"] for m in all_metrics if "mean_cte_m" in m]
-    lap_values = [m["best_lap_time_s"] for m in all_metrics if "best_lap_time_s" in m]
+            collision_count += 1
+        cte = m.get("mean_cte_m")
+        if cte is not None:
+            cte_values.append(cte)
+        lap = m.get("best_lap_time_s")
+        if lap is not None:
+            lap_values.append(lap)
 
     if not cte_values:
-        return float("inf")
+        return 100.0 * len(all_metrics)
 
     mean_cte = float(np.mean(cte_values))
     mean_lap = float(np.mean(lap_values)) if lap_values else 0.0
-    return mean_cte + lambda_time * mean_lap
+    return mean_cte + lambda_time * mean_lap + 100.0 * collision_count
 
 
 # ── Trial function ─────────────────────────────────────────────────────────────

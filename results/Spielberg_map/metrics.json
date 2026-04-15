@@ -1,8 +1,0 @@
-{
-  "status": "laps_complete",
-  "collision": false,
-  "elapsed_seconds": 97.92,
-  "mean_cte_m": 0.1747,
-  "max_cte_m": 0.9473,
-  "track": "Spielberg_map"
-}

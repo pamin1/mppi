@@ -1,27 +1,22 @@
 mppi_controller_node:
   ros__parameters:
+    cost_weights:
+      q_heading: 0.0
+      q_vx: 0.18719551312939403
+      q_vy: 1.0
+      q_x: 3.264164744448995
+      q_y: 3.264164744448995
+      q_yaw_rate: 0.0
+      r_accel: 0.1715301159702144
+      r_steering: 0.026145998148997388
+      r_steering_rate: 0.06684590684775682
     mppi:
-      samples: 10000
+      accel_dist: 1.0
+      alpha: 1.0
       control_frequency: 50
       horizon: 30
-      accel_dist: 1.0
+      samples: 10000
       steer_dist: 0.05
       temperature: 1.0
-      alpha: 1.0
-    
-    cost_weights:
-      q_x: 2.5
-      q_y: 2.5
-      q_heading: 0.0
-      q_vx: 1.0
-      q_vy: 1.0
-      q_yaw_rate: 0.0
-      r_accel: 0.001
-      r_steering: 0.01
-      r_steering_rate: 0.01
-
-    visualization:
-      enable_viz: true
-      top_k_paths: 1
-      line_width: 0.05
-      path_alpha: 1.0
+    vehicle:
+      v_max: 15.0

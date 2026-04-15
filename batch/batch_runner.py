@@ -296,6 +296,8 @@ def launch_ros_stack(track: dict, sim_config: Path, batch_cfg: dict, results_dir
     # path_planner.py appends ".csv" itself — pass the stem only
     trajectory = f"{map_name}_optimized"
     rrd_path   = _next_rrd_path(results_dir)
+    log_path     = results_dir / "run_log.csv"
+    metrics_path = results_dir / "metrics.json"
 
     log.info(f"trajectory:={trajectory} ")
 
@@ -309,7 +311,9 @@ def launch_ros_stack(track: dict, sim_config: Path, batch_cfg: dict, results_dir
         f"collision_threshold_m:={float(batch_cfg.get('collision_threshold_m', 0.12))} "
         f"collision_consecutive_readings:={int(batch_cfg.get('collision_consecutive_readings', 3))} "
         f"min_lap_distance:={float(batch_cfg.get('min_lap_distance', 30.0))} "
-        f"rerun_output:={rrd_path}"
+        f"rerun_output:={rrd_path} "
+        f"log_output:={log_path} "
+        f"metrics_output_path:={metrics_path}"
     )
 
     log.info(f"  Launching ROS2 stack for {map_name}...")
@@ -427,67 +431,65 @@ def teardown_ros_stack(proc: subprocess.Popen) -> None:
 
 # ── Stage 6: Results collection ───────────────────────────────────────────────
 
-def _find_monitor_log() -> Path | None:
+def collect_run_log(results_dir: Path, t_start: float) -> None:
     """
-    monitor_node.py writes logs relative to its own __file__.  Depending on
-    whether the workspace was built with --symlink-install the path is either:
-      src/mppi/resources/logs/run_NNN.csv           (symlink-install)
-      install/mppi/lib/resources/logs/run_NNN.csv   (regular install)
-    We search both, plus the direct source resources dir, and return the most
-    recently modified file.
+    The monitor node writes run_log.csv directly to results_dir via the
+    log_output launch argument.  This function just verifies the file was
+    written during the current run (mtime >= t_start).
     """
-    search_dirs = [
-        RESOURCES_SRC / "logs",
-        SIM_ROOT / "install" / "mppi" / "lib" / "resources" / "logs",
-        MPPI_SRC / "resources" / "logs",
-    ]
-    candidates: list[Path] = []
-    for d in search_dirs:
-        if d.exists():
-            candidates.extend(d.glob("run_*.csv"))
-
-    if not candidates:
-        return None
-    return max(candidates, key=lambda p: p.stat().st_mtime)
-
-
-def collect_run_log(results_dir: Path) -> None:
-    latest = _find_monitor_log()
-    if latest is None:
-        log.warning("  No run_*.csv found — monitor log not copied.")
-        return
     dest = results_dir / "run_log.csv"
-    shutil.copy(latest, dest)
-    log.info(f"  Run log → {dest}")
+    if not dest.exists():
+        log.warning("  run_log.csv not found — monitor may not have written it.")
+        return
+
+    epoch_threshold = time.time() - (time.monotonic() - t_start)
+    if dest.stat().st_mtime < epoch_threshold:
+        log.warning(
+            f"  run_log.csv mtime predates run start — stale file, ignoring."
+        )
+        dest.unlink()
+        return
+
+    log.info(f"  Run log: {dest} ({dest.stat().st_size} B)")
 
 
 def compute_metrics(results_dir: Path, status: str, elapsed: float) -> dict:
+    """
+    Load metrics from the monitor node's metrics.json as the primary source.
+    If the file doesn't exist (node crashed before writing), return a fallback
+    dict with collision=True and the elapsed time measured by batch_runner.
+    """
+    monitor_json = results_dir / "metrics.json"
+    if monitor_json.exists():
+        try:
+            with open(monitor_json) as f:
+                metrics = json.load(f)
+            # Always use the authoritative status/collision from the monitor,
+            # but override with batch_runner's elapsed (wall-clock truth).
+            metrics["elapsed_seconds"] = round(elapsed, 2)
+            # If batch_runner saw a different terminal status (e.g. status echo
+            # timed out but monitor wrote "laps_complete"), trust the monitor.
+            # If monitor wrote a status, keep it; otherwise use batch_runner's.
+            if "status" not in metrics:
+                metrics["status"] = status
+                metrics["collision"] = status == "collision"
+            log.info(f"  Metrics loaded from monitor JSON: {monitor_json}")
+            return metrics
+        except Exception as exc:
+            log.warning(f"  Could not parse metrics.json: {exc}")
+
+    # Fallback: monitor didn't write JSON (crashed or timed out hard)
+    log.warning(f"  metrics.json not found in {results_dir} — using fallback")
     metrics: dict = {
-        "status":           status,
-        "collision":        status == "collision",
-        "elapsed_seconds":  round(elapsed, 2),
+        "status":          status,
+        "collision":       status == "collision",
+        "elapsed_seconds": round(elapsed, 2),
+        "mean_cte_m":      None,
+        "max_cte_m":       None,
+        "lap_times":       [],
+        "best_lap_time_s": None,
+        "total_distance_m": None,
     }
-
-    run_log = results_dir / "run_log.csv"
-    if run_log.exists():
-        try:
-            df = pd.read_csv(run_log)
-            col = "cross_track_error_m"
-            if col in df.columns and len(df) > 0:
-                metrics["mean_cte_m"] = round(float(df[col].mean()), 4)
-                metrics["max_cte_m"]  = round(float(df[col].max()),  4)
-        except Exception as exc:
-            log.warning(f"  Could not parse run_log.csv: {exc}")
-
-    # Merge any metrics.json that the monitor node wrote during the run
-    monitor_metrics = results_dir / "metrics.json"
-    if monitor_metrics.exists():
-        try:
-            with open(monitor_metrics) as f:
-                metrics.update(json.load(f))
-        except Exception as exc:
-            log.warning(f"  Could not load existing metrics.json: {exc}")
-
     return metrics
 
 
@@ -511,6 +513,14 @@ def run_track(track: dict, batch_cfg: dict, skip_preprocessing: bool = False) ->
 
     results_dir = RESULTS_BASE / name
     results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clear stale per-run outputs so compute_metrics never reads data from a
+    # previous trial. Only run_log.csv and metrics.json are run-specific;
+    # optimized.csv and baseline.csv are kept (they don't change between trials).
+    for stale in ["run_log.csv", "metrics.json"]:
+        p = results_dir / stale
+        if p.exists():
+            p.unlink()
 
     ros_proc = None
     status   = "error"
@@ -555,7 +565,7 @@ def run_track(track: dict, batch_cfg: dict, skip_preprocessing: bool = False) ->
     elapsed = time.monotonic() - t_start
 
     # 8. Collect run log and save metrics
-    collect_run_log(results_dir)
+    collect_run_log(results_dir, t_start)
 
     metrics = compute_metrics(results_dir, status, elapsed)
     metrics["track"] = name
