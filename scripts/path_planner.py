@@ -28,8 +28,13 @@ class GlobalTrajectoryPublisher(Node):
 
         # load path
         share_dir = get_package_share_directory("mppi")
-        file = os.path.join(share_dir, "resources/Spielberg_map_optimized.csv")
-        df = pd.read_csv(file)
+
+        self.declare_parameter('trajectory_path', 'Spielberg_map_optimized')
+        fn = self.get_parameter('trajectory_path').value
+
+        self.get_logger().info(f"Loading trajectory: {fn}")
+
+        df = pd.read_csv(fn)
         self.x = df["x"].to_numpy()
         self.y = df["y"].to_numpy()
         self.speed = df["vx"].to_numpy()

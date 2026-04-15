@@ -2,86 +2,48 @@
 """
 Launch file for F1TENTH Racing with MPPI Controller
 
-Launches:
-1. F1TENTH Gym ROS simulator
-2. Global trajectory publisher (path planner)
-3. MPPI controller
-
 Usage:
     ros2 launch mppi mppi_racing_launch.py
-
-    # With custom map:
-    ros2 launch mppi mppi_racing_launch.py map:=Monza_map
-
-    # With custom trajectory:
-    ros2 launch mppi mppi_racing_launch.py trajectory:=Monza_map_optimized.csv
+    ros2 launch mppi mppi_racing_launch.py map:=wide_oval
 """
 
 import os
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    # Package directories
     mppi_pkg = get_package_share_directory("mppi")
-    f1tenth_gym_pkg = get_package_share_directory("f1tenth_gym_ros")
+    f1tenth_pkg = get_package_share_directory("f1tenth_gym_ros")
 
-    # Launch arguments
-    map_name_arg = DeclareLaunchArgument(
-        "map",
-        default_value="Spielberg_map",
-        description="Name of the map (without extension)",
+    params_file = os.path.join(mppi_pkg, "config", "sim.yaml")
+
+    # --- Arguments ---
+    map_arg = DeclareLaunchArgument(
+        "map", default_value="Spielberg_map",
+        description="Map name (without extension)",
     )
 
-    trajectory_file_arg = DeclareLaunchArgument(
-        "trajectory",
-        default_value="Spielberg_map_optimized.csv",
-        description="Name of trajectory CSV file",
-    )
-
-    use_rviz_arg = DeclareLaunchArgument(
-        "rviz", default_value="true", description="Launch RViz for visualization"
-    )
-
-    control_freq_arg = DeclareLaunchArgument(
-        "control_freq", default_value="50", description="MPPI control frequency (Hz)"
-    )
-
-    # Get launch configurations
+    # --- Derived substitutions ---
     map_name = LaunchConfiguration("map")
-    trajectory_file = LaunchConfiguration("trajectory")
-    use_rviz = LaunchConfiguration("rviz")
-    control_freq = LaunchConfiguration("control_freq")
-
-    # ==========================================================================
-    # 2. GLOBAL TRAJECTORY PUBLISHER (PATH PLANNER)
-    # ==========================================================================
-
-    # Build trajectory file path
+    trajectory_file = PythonExpression(["'", map_name, "_optimized.csv'"])
     trajectory_path = PathJoinSubstitution(
         [FindPackageShare("mppi"), "resources", trajectory_file]
     )
 
-    trajectory_publisher = Node(
+    # --- Nodes ---
+    path_planner = Node(
         package="mppi",
         executable="path_planner.py",
         name="path_planner",
         output="screen",
-    )
-
-    # ==========================================================================
-    # 3. MPPI CONTROLLER
-    # ==========================================================================
-
-    # MPPI parameters file
-    mppi_params_file = os.path.join(
-        get_package_share_directory("mppi"), "config", "cost_weights.yaml"
+        parameters=[{"trajectory_path": trajectory_path}],
     )
 
     mppi_controller = Node(
@@ -89,24 +51,19 @@ def generate_launch_description():
         executable="mppi_controller_node",
         name="mppi_controller",
         output="screen",
-        parameters=[
-            mppi_params_file,
-        ],
+        parameters=[params_file],
     )
 
-    # ==========================================================================
-    # LAUNCH DESCRIPTION
-    # ==========================================================================
-
-    return LaunchDescription(
-        [
-            # Arguments
-            map_name_arg,
-            trajectory_file_arg,
-            use_rviz_arg,
-            control_freq_arg,
-            # Nodes
-            trajectory_publisher,  # Path planner
-            mppi_controller,  # MPPI controller
-        ]
+    f1tenth_sim = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(f1tenth_pkg, "launch", "gym_bridge_launch.py")
+        ),
+        launch_arguments={"params_file": params_file}.items(),
     )
+
+    return LaunchDescription([
+        map_arg,
+        path_planner,
+        mppi_controller,
+        f1tenth_sim,
+    ])
