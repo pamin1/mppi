@@ -90,6 +90,7 @@ install(DIRECTORY include/
 
 install(PROGRAMS
   scripts/path_planner.py
+  scripts/local_map.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

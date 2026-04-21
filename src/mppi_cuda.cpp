@@ -245,34 +245,35 @@ void MPPI_Controller::updateControl()
         return;
     }
 
-    // laserscan gap finding
-    float r_min = 3.0;
-    gaps = findGaps(scan, r_min);
-    int num_gaps = gaps.size();
-    RCLCPP_INFO(this->get_logger(), "Num Gaps: %d", static_cast<int>(gaps.size()));
+    // replacing with local cost map
+    // // laserscan gap finding
+    // float r_min = 3.0;
+    // gaps = findGaps(scan, r_min);
+    // int num_gaps = gaps.size();
+    // RCLCPP_INFO(this->get_logger(), "Num Gaps: %d", static_cast<int>(gaps.size()));
 
-    // Build ranges: 0 outside gaps, original range inside gaps
-    std::vector<float> gap_ranges(scan->ranges.size(), 0.0f);
-    std::vector<Gaussian> modes(num_gaps);
-    for (int i = 0; i < gaps.size(); i++)
-    {
-        for (int j = gaps[i].start; j <= gaps[i].end; j++)
-        {
-            gap_ranges[j] = scan->ranges[j];
-        }
+    // // Build ranges: 0 outside gaps, original range inside gaps
+    // std::vector<float> gap_ranges(scan->ranges.size(), 0.0f);
+    // std::vector<Gaussian> modes(num_gaps);
+    // for (int i = 0; i < gaps.size(); i++)
+    // {
+    //     for (int j = gaps[i].start; j <= gaps[i].end; j++)
+    //     {
+    //         gap_ranges[j] = scan->ranges[j];
+    //     }
         
-        // gap finding
-        int mid_idx = (gaps[i].start + gaps[i].end) / 2;
-        float angle = scan->angle_min + mid_idx * scan->angle_increment;
+    //     // gap finding
+    //     int mid_idx = (gaps[i].start + gaps[i].end) / 2;
+    //     float angle = scan->angle_min + mid_idx * scan->angle_increment;
 
-        Gaussian mode;
-        mode.mean = angle;
-        mode.std_dev = 0.05; // can modify later
-        modes.push_back(mode);
-        RCLCPP_INFO(this->get_logger(), "Gap %d: start=%d, end=%d, angle=%f", i, gaps[i].start, gaps[i].end, angle);
-    }
+    //     Gaussian mode;
+    //     mode.mean = angle;
+    //     mode.std_dev = 0.05; // can modify later
+    //     modes.push_back(mode);
+    //     RCLCPP_INFO(this->get_logger(), "Gap %d: start=%d, end=%d, angle=%f", i, gaps[i].start, gaps[i].end, angle);
+    // }
 
-    publishLaserScan(gap_ranges, scan);
+    // publishLaserScan(gap_ranges, scan);
 
     // get the initial control sequence -- warm starting
     if (!controlSeqInitialized)

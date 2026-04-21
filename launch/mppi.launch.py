@@ -46,6 +46,13 @@ def generate_launch_description():
         parameters=[{"trajectory_path": trajectory_path}],
     )
 
+    local_map = Node(
+        package="mppi",
+        executable="local_map.py",
+        name="local_map",
+        output="screen",
+    )
+
     mppi_controller = Node(
         package="mppi",
         executable="mppi_controller_node",
@@ -64,6 +71,7 @@ def generate_launch_description():
     return LaunchDescription([
         map_arg,
         path_planner,
+        local_map,
         mppi_controller,
         f1tenth_sim,
     ])
