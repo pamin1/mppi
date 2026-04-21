@@ -16,7 +16,7 @@ mppi_controller:
       q_vx: 1.0
       q_vy: 1.0
       q_yaw_rate: 0.0
-      r_accel: 0.001
+      r_accel: 0.0001
       r_steering: 0.01
       r_steering_rate: 0.01
 
@@ -41,7 +41,7 @@ bridge:
     opp_drive_topic: 'opp_drive'
 
     # map parameters
-    map_path: '/home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/wide_oval'
+    map_path: '/home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/simple_oval'
     map_img_ext: '.png'
     
     # transform related
@@ -56,9 +56,9 @@ bridge:
     num_agent: 1
 
     # ego starting pose on map
-    sx: 0.0
-    sy: -30.5
-    stheta: 0.0
+    sx: -1.5
+    sy: 12.0
+    stheta: 180.0
 
     # opp starting pose on map
     sx1: 2.0
