@@ -1,7 +1,9 @@
 #include <ackermann_msgs/msg/ackermann_drive_stamped.hpp>
 #include <autoware_auto_planning_msgs/msg/trajectory.hpp>
 #include <chrono>
+#include <mppi/gap_detector.hpp>
 #include <mppi/kernel_launch.hpp>
+#include <mppi/util.hpp>
 #include <mppi/vehicle_util.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -11,7 +13,6 @@
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
-#include <mppi/util.hpp>
 
 class MPPI_Controller : public rclcpp::Node
 {
@@ -25,8 +26,11 @@ class MPPI_Controller : public rclcpp::Node
 
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void trajectoryCallback(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr msg);
+    void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
+
     void updateControl();
     void publishTopKPaths(const std::vector<double> &weights, const std::vector<ControlInput> &allControls);
+    void publishLaserScan(const std::vector<float> &ranges, const sensor_msgs::msg::LaserScan::SharedPtr &original);
 
   private:
     // controller set up
@@ -74,6 +78,8 @@ class MPPI_Controller : public rclcpp::Node
     VehicleState state;
     CostWeights weights;
 
+    std::vector<Gap> gaps;
+
     // transforms
     std::shared_ptr<tf2_ros::Buffer> tfBuffer;
     std::shared_ptr<tf2_ros::TransformListener> tfListener;
@@ -81,10 +87,12 @@ class MPPI_Controller : public rclcpp::Node
     // subscribers
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
     rclcpp::Subscription<autoware_auto_planning_msgs::msg::Trajectory>::SharedPtr trajSub;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr laserSub;
 
     // publishers
     rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr controllerPub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr vizPub;
+    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scanPub;
 
     // timer
     rclcpp::TimerBase::SharedPtr controlTimer;
@@ -92,4 +100,5 @@ class MPPI_Controller : public rclcpp::Node
     // messages
     nav_msgs::msg::Odometry::SharedPtr odom;
     autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj;
+    sensor_msgs::msg::LaserScan::SharedPtr scan;
 };
