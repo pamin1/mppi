@@ -2,7 +2,9 @@
 #include <autoware_auto_planning_msgs/msg/trajectory.hpp>
 #include <chrono>
 #include <mppi/kernel_launch.hpp>
-#include <mppi/vehicle_util.hpp>
+#include <mppi/mppi_util.hpp>
+#include <mppi/util.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <random>
@@ -25,6 +27,8 @@ class MPPI_Controller : public rclcpp::Node
 
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void trajectoryCallback(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr msg);
+    void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+
     void updateControl();
     void publishTopKPaths(const std::vector<double> &weights, const std::vector<ControlInput> &allControls);
 
@@ -56,6 +60,8 @@ class MPPI_Controller : public rclcpp::Node
     // GPU arrays
     int block, grid;
 
+    MPPIConfig *d_mppi_config;
+
     ControlInput *d_optimalControls;
     ControlInput *d_nominalControls;
     VehicleState *d_refTraj;
@@ -69,10 +75,17 @@ class MPPI_Controller : public rclcpp::Node
     ControlInput *d_controls;
     double *d_costs;
 
+    int8_t *d_costmap_data;
+    CostmapInfo *d_costmap_info;
+
     // vehicle set up
     VehicleParams params;
     VehicleState state;
     CostWeights weights;
+
+    int costmap_size;
+    size_t grid_size;
+    std::vector<Gap> gaps;
 
     // transforms
     std::shared_ptr<tf2_ros::Buffer> tfBuffer;
@@ -81,6 +94,7 @@ class MPPI_Controller : public rclcpp::Node
     // subscribers
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
     rclcpp::Subscription<autoware_auto_planning_msgs::msg::Trajectory>::SharedPtr trajSub;
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr mapSub;
 
     // publishers
     rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr controllerPub;
@@ -92,4 +106,5 @@ class MPPI_Controller : public rclcpp::Node
     // messages
     nav_msgs::msg::Odometry::SharedPtr odom;
     autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj;
+    nav_msgs::msg::OccupancyGrid::SharedPtr map;
 };

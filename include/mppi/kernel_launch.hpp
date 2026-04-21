@@ -1,7 +1,7 @@
 #pragma once
 
 #include <curand_kernel.h>
-#include <mppi/vehicle_util.hpp>
+#include <mppi/mppi_util.hpp>
 
 void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int block);
 
@@ -22,7 +22,7 @@ void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int blo
  * @param grid Size of grid
  * @param block Size of block
  */
-void launchMPPIKernel(ControlInput *d_controlSamples, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering, int grid, int block);
+void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig *config, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block);
 
 /**
  * @brief Executes the thrust device functions

@@ -20,6 +20,21 @@ mppi_controller:
       r_steering: 0.01
       r_steering_rate: 0.01
 
+    local_map:
+      size: 10.0
+      resolution: 0.05
+      inflation_radius: 0.3
+      lethal_cost: 100
+      inscribed_cost: 99
+      decay_power: 2.0
+      publish_rate_hz: 20.0
+    topics:
+      scan: "/scan"
+      odom: "/ego_racecar/odom"
+      costmap: "/local_costmap"
+    frames:
+      costmap: "ego_racecar/base_link"
+
     visualization:
       enable_viz: true
       top_k_paths: 1

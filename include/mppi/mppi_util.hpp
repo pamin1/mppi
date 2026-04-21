@@ -50,6 +50,30 @@ struct CostWeights
     double rAccel, rSteering, rSteeringRate;
 };
 
+struct Gaussian
+{
+    float mean, std_dev;
+};
+
+struct CostmapInfo
+{
+    const int8_t *data;
+    int width;
+    int height;
+    float resolution;
+    float origin_offset;
+    int8_t lethal_cost;
+};
+
+struct MPPIConfig
+{
+    int samples;
+    int horizon;
+    float dt;
+    float sigmaAcceleration;
+    float sigmaSteering;
+};
+
 __host__ __device__ inline VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)
 {
     VehicleState nextState = state;
