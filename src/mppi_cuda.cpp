@@ -45,11 +45,10 @@ MPPI_Controller::MPPI_Controller()
     // subscribers
     odomSub = this->create_subscription<nav_msgs::msg::Odometry>("/ego_racecar/odom", 10, std::bind(&MPPI_Controller::odomCallback, this, std::placeholders::_1));
     trajSub = this->create_subscription<autoware_auto_planning_msgs::msg::Trajectory>("/planner_traj", 10, std::bind(&MPPI_Controller::trajectoryCallback, this, std::placeholders::_1));
-    laserSub = this->create_subscription<sensor_msgs::msg::LaserScan>("/scan", 10, std::bind(&MPPI_Controller::scanCallback, this, std::placeholders::_1));
+
     // publishers
     controllerPub = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/drive", 10);
     vizPub = this->create_publisher<visualization_msgs::msg::MarkerArray>("/mppi/top_k_paths", 10);
-    scanPub = this->create_publisher<sensor_msgs::msg::LaserScan>("/mppi/ranges", 10);
 
     // timer
     controlTimer = this->create_wall_timer(std::chrono::duration<float>(dt), std::bind(&MPPI_Controller::updateControl, this));
@@ -81,11 +80,6 @@ void MPPI_Controller::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 void MPPI_Controller::trajectoryCallback(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr msg)
 {
     traj = msg;
-}
-
-void MPPI_Controller::scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
-{
-    scan = msg;
 }
 
 void MPPI_Controller::loadParameters()
@@ -227,9 +221,9 @@ void MPPI_Controller::updateTraj(const autoware_auto_planning_msgs::msg::Traject
 void MPPI_Controller::updateControl()
 {
     // safety check for data available
-    if (!odom || !traj || !scan)
+    if (!odom || !traj)
     {
-        RCLCPP_INFO(this->get_logger(), "Waiting for odometry or trajectory or laserscan");
+        RCLCPP_INFO(this->get_logger(), "Waiting for odometry or trajectory");
         return;
     }
 
@@ -244,36 +238,6 @@ void MPPI_Controller::updateControl()
         RCLCPP_ERROR(this->get_logger(), "Caught error attempting to update vehicle state");
         return;
     }
-
-    // replacing with local cost map
-    // // laserscan gap finding
-    // float r_min = 3.0;
-    // gaps = findGaps(scan, r_min);
-    // int num_gaps = gaps.size();
-    // RCLCPP_INFO(this->get_logger(), "Num Gaps: %d", static_cast<int>(gaps.size()));
-
-    // // Build ranges: 0 outside gaps, original range inside gaps
-    // std::vector<float> gap_ranges(scan->ranges.size(), 0.0f);
-    // std::vector<Gaussian> modes(num_gaps);
-    // for (int i = 0; i < gaps.size(); i++)
-    // {
-    //     for (int j = gaps[i].start; j <= gaps[i].end; j++)
-    //     {
-    //         gap_ranges[j] = scan->ranges[j];
-    //     }
-        
-    //     // gap finding
-    //     int mid_idx = (gaps[i].start + gaps[i].end) / 2;
-    //     float angle = scan->angle_min + mid_idx * scan->angle_increment;
-
-    //     Gaussian mode;
-    //     mode.mean = angle;
-    //     mode.std_dev = 0.05; // can modify later
-    //     modes.push_back(mode);
-    //     RCLCPP_INFO(this->get_logger(), "Gap %d: start=%d, end=%d, angle=%f", i, gaps[i].start, gaps[i].end, angle);
-    // }
-
-    // publishLaserScan(gap_ranges, scan);
 
     // get the initial control sequence -- warm starting
     if (!controlSeqInitialized)
@@ -391,23 +355,6 @@ void MPPI_Controller::publishTopKPaths(const std::vector<double> &weights, const
     }
 
     vizPub->publish(markerArray);
-}
-
-void MPPI_Controller::publishLaserScan(const std::vector<float> &ranges,
-                                       const sensor_msgs::msg::LaserScan::SharedPtr &original)
-{
-    sensor_msgs::msg::LaserScan scan;
-    scan.header = original->header;
-    scan.angle_min = original->angle_min;
-    scan.angle_max = original->angle_max;
-    scan.angle_increment = original->angle_increment;
-    scan.time_increment = original->time_increment;
-    scan.scan_time = original->scan_time;
-    scan.range_min = original->range_min;
-    scan.range_max = original->range_max;
-    scan.ranges = ranges;
-
-    scanPub->publish(scan);
 }
 
 int main(int argc, char **argv)

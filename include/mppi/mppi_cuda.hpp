@@ -26,11 +26,9 @@ class MPPI_Controller : public rclcpp::Node
 
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void trajectoryCallback(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr msg);
-    void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
 
     void updateControl();
     void publishTopKPaths(const std::vector<double> &weights, const std::vector<ControlInput> &allControls);
-    void publishLaserScan(const std::vector<float> &ranges, const sensor_msgs::msg::LaserScan::SharedPtr &original);
 
   private:
     // controller set up
@@ -87,12 +85,10 @@ class MPPI_Controller : public rclcpp::Node
     // subscribers
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
     rclcpp::Subscription<autoware_auto_planning_msgs::msg::Trajectory>::SharedPtr trajSub;
-    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr laserSub;
 
     // publishers
     rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr controllerPub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr vizPub;
-    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scanPub;
 
     // timer
     rclcpp::TimerBase::SharedPtr controlTimer;
@@ -100,5 +96,4 @@ class MPPI_Controller : public rclcpp::Node
     // messages
     nav_msgs::msg::Odometry::SharedPtr odom;
     autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj;
-    sensor_msgs::msg::LaserScan::SharedPtr scan;
 };
