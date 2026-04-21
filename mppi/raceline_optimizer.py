@@ -6,9 +6,9 @@ import os
 # basic vehicle params -- needs to be tuned
 MU = 1.0489
 G = 9.81
-ACCEL_MAX = 9.5  # m/s^2
+ACCEL_MAX = 20.0 # m/s^2
 DECEL_MAX = 10.0  # m/s^2
-V_MAX = 7.50  # m/s
+V_MAX = 10.0  # m/s
 SAFETY_BUFFER = 0.50  # meters
 DOWNSAMPLE_FACTOR = 20
 
@@ -165,21 +165,21 @@ def optimize_baseline(input_csv_path, output_csv_path, v_max=V_MAX, accel_max=AC
     df = pd.read_csv(input_csv_path)
     x = df["x"].values
     y = df["y"].values
+    n = len(x)
 
-    # arc lengths (include wrap-around for periodic spline)
-    ds = np.sqrt(np.diff(x)**2 + np.diff(y)**2)
-    d_wrap = np.sqrt((x[0] - x[-1])**2 + (y[0] - y[-1])**2)
-    s = np.cumsum(np.insert(np.append(ds, d_wrap), 0, 0))
+    # curvature from finite differences (periodic)
+    dx = np.zeros(n)
+    dy = np.zeros(n)
+    ddx = np.zeros(n)
+    ddy = np.zeros(n)
 
-    # periodic splines for smooth curvature
-    spline_x = interpolate.CubicSpline(s, np.append(x, x[0]), bc_type="periodic")
-    spline_y = interpolate.CubicSpline(s, np.append(y, y[0]), bc_type="periodic")
-
-    s_dense = np.linspace(s[0], s[-1], len(x))
-    dx = spline_x(s_dense, 1)
-    dy = spline_y(s_dense, 1)
-    ddx = spline_x(s_dense, 2)
-    ddy = spline_y(s_dense, 2)
+    for i in range(n):
+        ip = (i + 1) % n
+        im = (i - 1) % n
+        dx[i] = x[ip] - x[im]
+        dy[i] = y[ip] - y[im]
+        ddx[i] = x[ip] - 2 * x[i] + x[im]
+        ddy[i] = y[ip] - 2 * y[i] + y[im]
 
     kappa = np.abs(dx * ddy - dy * ddx) / (dx**2 + dy**2)**1.5
     yaw = np.arctan2(dy, dx)
@@ -189,7 +189,7 @@ def optimize_baseline(input_csv_path, output_csv_path, v_max=V_MAX, accel_max=AC
 
     lap_time = np.sum(distances / velocity[:-1])
     print(f"Estimated lap time: {lap_time:.2f}s")
-    print(f"Avg speed: {s[-1] / lap_time:.2f} m/s")
+    print(f"Avg speed: {np.sum(distances) / lap_time:.2f} m/s")
     print(f"Speed range: {velocity.min():.2f} - {velocity.max():.2f} m/s")
     print(f"Max curvature: {kappa.max():.4f} 1/m")
 

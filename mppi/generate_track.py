@@ -54,11 +54,13 @@ def generate_control_points(
     return np.column_stack([x, y])
 
 
-def preset_oval(scale: float = 30.0) -> np.ndarray:
-    """Oval track control points."""
-    t = np.linspace(0, 2 * np.pi, 20, endpoint=False)
-    x = scale * 1.5 * np.cos(t)
-    y = scale * np.sin(t)
+def preset_oval(scale: float = 30.0, num_samples: int = 1500) -> np.ndarray:
+    """Oval track — sampled directly, no spline needed."""
+    t = np.linspace(0, 2 * np.pi, num_samples, endpoint=False)
+    a = scale * 1.5
+    b = scale
+    x = a * np.cos(t)
+    y = b * np.sin(t)
     return np.column_stack([x, y])
 
 
