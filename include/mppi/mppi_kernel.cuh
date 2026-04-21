@@ -2,7 +2,7 @@
 #include <cuda_runtime_api.h>
 #include <curand_kernel.h>
 #include <device_launch_parameters.h>
-#include <mppi/vehicle_util.hpp>
+#include <mppi/mppi_util.hpp>
 
 struct weightFunctor
 {
@@ -66,8 +66,24 @@ __device__ __forceinline__ double computeCost(const VehicleState &predicted, con
 }
 
 /**
+ * @brief Checks for a collision against the Occupancy Grid map
+ */
+__device__ bool checkCollision(const CostmapInfo &map, int x, int y)
+{
+    int gx = __float2int_rd((x + map.origin_offset) / map.resolution);
+    int gy = __float2int_rd((y + map.origin_offset) / map.resolution);
+
+    if (gx >= 0 && gx < map.width && gy >= 0 && gy < map.height)
+    {
+        return map.data[gy * map.width + gx] >= 128;
+    }
+    return true; // out of bounds = collision
+}
+
+/**
  * @brief Creates the distribution of inputs for a single timestep. Timesteps are iterated on CPU, this computes the cost to go for the timestep on GPU
  * @param controlSamples Output array of sample control inputs
+ * @param config Struct of the MPPI configuration values
  * @param costs Output array of rollout costs
  * @param nominalControlSequence Input array of previous control sequence to build on
  * @param refTrajectory Input array of optimized path planning trajectory points
@@ -75,12 +91,8 @@ __device__ __forceinline__ double computeCost(const VehicleState &predicted, con
  * @param weights Input of controller cost function weights
  * @param params Vehicle model parameters
  * @param states cuRAND states for RNG
- * @param samples Size of sample distribution
- * @param horizon Number of timesteps to take
- * @param sigmaAccel Standard Deviation for acceleration
- * @param sigmaSteering Standard Deviation for steering
  */
-__global__ void mppiKernel(ControlInput *controlSamples, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering);
+__global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states);
 
 /**
  * @brief Computes the weigthed optimal control input for each time step in the horizon

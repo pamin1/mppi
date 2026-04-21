@@ -2,40 +2,9 @@
 #include <mppi/mppi_cuda.hpp>
 #include <numeric>
 
-// make an include file for the vehicle dynamics and the function stepping
-
 MPPI_Controller::MPPI_Controller()
     : rclcpp::Node("mppi_controller")
 {
-    // default controller params
-    this->declare_parameter("mppi.samples", 10000);
-    this->declare_parameter("mppi.control_frequency", 50);
-    this->declare_parameter("mppi.horizon", 30);
-    this->declare_parameter("mppi.temperature", 1.0);
-    this->declare_parameter("mppi.alpha", 0.1);
-
-    // distribution tuning
-    this->declare_parameter("mppi.accel_dist", 2.0);
-    this->declare_parameter("mppi.steer_dist", 0.3);
-
-    // state tracking weights
-    this->declare_parameter("cost_weights.q_x", 1.0);
-    this->declare_parameter("cost_weights.q_y", 1.0);
-    this->declare_parameter("cost_weights.q_heading", 10.0);
-    this->declare_parameter("cost_weights.q_vx", 1.0);
-    this->declare_parameter("cost_weights.q_vy", 0.5);
-    this->declare_parameter("cost_weights.q_yaw_rate", 0.5);
-
-    // control effort weights
-    this->declare_parameter("cost_weights.r_accel", 0.1);
-    this->declare_parameter("cost_weights.r_steering", 0.1);
-    this->declare_parameter("cost_weights.r_steering_rate", 0.1);
-
-    // visualization
-    this->declare_parameter("visualization.enable_viz", true);
-    this->declare_parameter("visualization.top_k_paths", 10);
-    this->declare_parameter("visualization.line_width", 0.02);
-    this->declare_parameter("visualization.path_alpha", 0.7);
     loadParameters();
 
     // tranforms
@@ -45,6 +14,7 @@ MPPI_Controller::MPPI_Controller()
     // subscribers
     odomSub = this->create_subscription<nav_msgs::msg::Odometry>("/ego_racecar/odom", 10, std::bind(&MPPI_Controller::odomCallback, this, std::placeholders::_1));
     trajSub = this->create_subscription<autoware_auto_planning_msgs::msg::Trajectory>("/planner_traj", 10, std::bind(&MPPI_Controller::trajectoryCallback, this, std::placeholders::_1));
+    mapSub = this->create_subscription<nav_msgs::msg::OccupancyGrid>("/local_costmap", 10, std::bind(&MPPI_Controller::mapCallback, this, std::placeholders::_1));
 
     // publishers
     controllerPub = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/drive", 10);
@@ -68,6 +38,8 @@ MPPI_Controller::~MPPI_Controller()
     cudaFree(d_rngStates);
     cudaFree(d_controls);
     cudaFree(d_costs);
+    cudaFree(d_costmap_data);
+    cudaFree(d_costmap_info);
 
     RCLCPP_INFO(this->get_logger(), "CUDA memory freed");
 }
@@ -80,6 +52,26 @@ void MPPI_Controller::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 void MPPI_Controller::trajectoryCallback(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr msg)
 {
     traj = msg;
+}
+
+void MPPI_Controller::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+    map = msg;
+
+    // copy grid data to device
+    cudaMemcpy(d_costmap_data, map->data.data(), grid_size * sizeof(int8_t), cudaMemcpyHostToDevice);
+
+    // build struct with device pointer
+    CostmapInfo costmap_info;
+    costmap_info.data = d_costmap_data; // device pointer, allocated once in constructor
+    costmap_info.height = map->info.height;
+    costmap_info.width = map->info.width;
+    costmap_info.resolution = map->info.resolution;
+    costmap_info.origin_offset = costmap_size / 2.0f;
+    costmap_info.lethal_cost = 100;
+
+    // copy struct to device
+    cudaMemcpy(d_costmap_info, &costmap_info, sizeof(CostmapInfo), cudaMemcpyHostToDevice);
 }
 
 void MPPI_Controller::loadParameters()
@@ -97,6 +89,38 @@ void MPPI_Controller::loadParameters()
         RCLCPP_INFO(this->get_logger(), "Device: %d", deviceCount);
     }
 
+    // default controller params
+    this->declare_parameter("mppi.samples", 10000);
+    this->declare_parameter("mppi.control_frequency", 50);
+    this->declare_parameter("mppi.horizon", 30);
+    this->declare_parameter("mppi.temperature", 1.0);
+    this->declare_parameter("mppi.alpha", 0.1);
+
+    // distribution tuning
+    this->declare_parameter("mppi.accel_dist", 2.0);
+    this->declare_parameter("mppi.steer_dist", 0.3);
+
+    // state tracking weights
+    this->declare_parameter("cost_weights.q_x", 1.0);
+    this->declare_parameter("cost_weights.q_y", 1.0);
+    this->declare_parameter("cost_weights.q_heading", 10.0);
+    this->declare_parameter("cost_weights.q_vx", 1.0);
+    this->declare_parameter("cost_weights.q_vy", 0.5);
+    this->declare_parameter("cost_weights.q_yaw_rate", 0.5);
+    this->declare_parameter("cost_weights.r_accel", 0.1);
+    this->declare_parameter("cost_weights.r_steering", 0.1);
+    this->declare_parameter("cost_weights.r_steering_rate", 0.1);
+
+    // map info
+    this->declare_parameter("local_map.size", 10.0);
+    this->declare_parameter("local_map.resolution", 0.05);
+
+    // visualization
+    this->declare_parameter("visualization.enable_viz", true);
+    this->declare_parameter("visualization.top_k_paths", 10);
+    this->declare_parameter("visualization.line_width", 0.02);
+    this->declare_parameter("visualization.path_alpha", 0.7);
+
     samples = this->get_parameter("mppi.samples").as_int();
     controlFrequency = this->get_parameter("mppi.control_frequency").as_int();
     dt = 1.0f / controlFrequency;
@@ -106,6 +130,13 @@ void MPPI_Controller::loadParameters()
 
     sigmaAcceleration = this->get_parameter("mppi.accel_dist").as_double();
     sigmaSteering = this->get_parameter("mppi.steer_dist").as_double();
+
+    MPPIConfig mppi_config;
+    mppi_config.samples = samples;
+    mppi_config.horizon = horizon;
+    mppi_config.dt = dt;
+    mppi_config.sigmaAcceleration = sigmaAcceleration;
+    mppi_config.sigmaSteering= sigmaSteering;
 
     weights.qX = this->get_parameter("cost_weights.q_x").as_double();
     weights.qY = this->get_parameter("cost_weights.q_y").as_double();
@@ -121,6 +152,11 @@ void MPPI_Controller::loadParameters()
     topKPaths = this->get_parameter("visualization.top_k_paths").as_int();
     vizLineWidth = static_cast<float>(this->get_parameter("visualization.line_width").as_double());
     vizPathAlpha = static_cast<float>(this->get_parameter("visualization.path_alpha").as_double());
+
+    costmap_size = this->get_parameter("local_map.size").as_double();
+    float resolution = this->get_parameter("local_map.resolution").as_double();
+    int grid_width = static_cast<int>(costmap_size / resolution);
+    grid_size = grid_width * grid_width;
 
     RCLCPP_INFO(this->get_logger(), "Loaded parameters:");
     RCLCPP_INFO(this->get_logger(), "  samples: %d", samples);
@@ -143,6 +179,7 @@ void MPPI_Controller::loadParameters()
     RCLCPP_INFO(this->get_logger(), "  r_steering_rate: %.3f", weights.rSteeringRate);
 
     // set up GPU arrays
+    CHECK_ERROR(cudaMalloc((void **)&d_mppi_config, sizeof(MPPIConfig)));
     CHECK_ERROR(cudaMalloc((void **)&d_optimalControls, sizeof(ControlInput) * horizon));
     CHECK_ERROR(cudaMalloc((void **)&d_nominalControls, sizeof(ControlInput) * horizon));
     CHECK_ERROR(cudaMalloc((void **)&d_refTraj, sizeof(VehicleState) * horizon));
@@ -152,10 +189,13 @@ void MPPI_Controller::loadParameters()
     CHECK_ERROR(cudaMalloc((void **)&d_rngStates, sizeof(curandState) * samples));
     CHECK_ERROR(cudaMalloc((void **)&d_controls, sizeof(ControlInput) * samples * horizon)); // 30 * 10000 * 16B = 3MB+??
     CHECK_ERROR(cudaMalloc((void **)&d_costs, sizeof(double) * samples));
+    CHECK_ERROR(cudaMalloc((void **)&d_costmap_info, sizeof(CostmapInfo)));
+    CHECK_ERROR(cudaMalloc((void **)&d_costmap_data, grid_size * sizeof(int8_t)));
 
     // copy fixed values over
     cudaMemcpy(d_weights, &weights, sizeof(CostWeights), cudaMemcpyHostToDevice);
     cudaMemcpy(d_params, &params, sizeof(VehicleParams), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_mppi_config, &mppi_config, sizeof(MPPIConfig), cudaMemcpyHostToDevice);
 
     block = 512;
     grid = (samples + block - 1) / block;
@@ -187,6 +227,7 @@ void MPPI_Controller::updateState(const nav_msgs::msg::Odometry::SharedPtr odom)
     state.vy = odom->twist.twist.linear.y;
     state.yawRate = odom->twist.twist.angular.z;
 }
+
 void MPPI_Controller::updateTraj(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj)
 {
     trajectory.clear();
@@ -257,7 +298,7 @@ void MPPI_Controller::updateControl()
     cudaMemcpy(d_currState, &state, sizeof(VehicleState), cudaMemcpyHostToDevice);
 
     // cost function is the error
-    launchMPPIKernel(d_controls, d_costs, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates, samples, horizon, dt, sigmaAcceleration, sigmaSteering, grid, block);
+    launchMPPIKernel(d_controls, d_mppi_config, d_costs, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates, grid, block);
 
     launchThrustWeighting(d_costs, samples, temperature);
 

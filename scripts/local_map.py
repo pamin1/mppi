@@ -18,31 +18,39 @@ class LocalCostmapNode(Node):
     def __init__(self):
         super().__init__('local_costmap_node')
 
-        # --- Declare parameters ---
-        self.declare_parameter('costmap_size', 10.0)         # meters, side length
-        self.declare_parameter('resolution', 0.05)           # meters/cell
-        self.declare_parameter('inflation_radius', 0.3)      # meters
-        self.declare_parameter('lethal_cost', 100)            # OccupancyGrid lethal value
-        self.declare_parameter('inscribed_cost', 99)          # cost at inflation boundary
-        self.declare_parameter('decay_power', 2.0)            # inflation decay exponent
-        self.declare_parameter('scan_topic', '/scan')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
-        self.declare_parameter('costmap_topic', '/local_costmap')
-        self.declare_parameter('costmap_frame', 'ego_racecar/base_link')
-        self.declare_parameter('publish_rate_hz', 20.0)
+        # --- Local map parameters ---
+        self.declare_parameter('local_map.size', 10.0)
+        self.declare_parameter('local_map.resolution', 0.05)
+        self.declare_parameter('local_map.inflation_radius', 0.3)
+        self.declare_parameter('local_map.lethal_cost', 100)
+        self.declare_parameter('local_map.inscribed_cost', 99)
+        self.declare_parameter('local_map.decay_power', 2.0)
+        self.declare_parameter('local_map.publish_rate_hz', 20.0)
 
-        # --- Read parameters ---
-        self.costmap_size = self.get_parameter('costmap_size').value
-        self.resolution = self.get_parameter('resolution').value
-        self.inflation_radius = self.get_parameter('inflation_radius').value
-        self.lethal_cost = self.get_parameter('lethal_cost').value
-        self.inscribed_cost = self.get_parameter('inscribed_cost').value
-        self.decay_power = self.get_parameter('decay_power').value
-        scan_topic = self.get_parameter('scan_topic').value
-        odom_topic = self.get_parameter('odom_topic').value
-        costmap_topic = self.get_parameter('costmap_topic').value
-        self.costmap_frame = self.get_parameter('costmap_frame').value
-        publish_rate = self.get_parameter('publish_rate_hz').value
+        # --- Topics ---
+        self.declare_parameter('topics.scan', '/scan')
+        self.declare_parameter('topics.odom', '/ego_racecar/odom')
+        self.declare_parameter('topics.costmap', '/local_costmap')
+
+        # --- Frames ---
+        self.declare_parameter('frames.costmap', 'ego_racecar/base_link')
+
+        # --- Local map parameters ---
+        self.costmap_size = self.get_parameter('local_map.size').value
+        self.resolution = self.get_parameter('local_map.resolution').value
+        self.inflation_radius = self.get_parameter('local_map.inflation_radius').value
+        self.lethal_cost = self.get_parameter('local_map.lethal_cost').value
+        self.inscribed_cost = self.get_parameter('local_map.inscribed_cost').value
+        self.decay_power = self.get_parameter('local_map.decay_power').value
+        publish_rate = self.get_parameter('local_map.publish_rate_hz').value
+
+        # --- Topics ---
+        scan_topic = self.get_parameter('topics.scan').value
+        odom_topic = self.get_parameter('topics.odom').value
+        costmap_topic = self.get_parameter('topics.costmap').value
+
+        # --- Frames ---
+        self.costmap_frame = self.get_parameter('frames.costmap').value
 
         # Grid dimensions
         self.grid_width = int(self.costmap_size / self.resolution)

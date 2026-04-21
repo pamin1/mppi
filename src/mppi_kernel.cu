@@ -11,12 +11,12 @@ __global__ void setupRNG(curandState *states, unsigned long seed)
     curand_init(seed, idx, 0, &states[idx]);
 }
 
-__global__ void mppiKernel(ControlInput *controlSamples, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering)
+__global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states)
 {
     // each thread will handle 1 of the MPPI samples
     int k = threadIdx.x + blockIdx.x * blockDim.x;
 
-    if (k >= samples)
+    if (k >= config->samples)
     {
         return;
     }
@@ -26,10 +26,10 @@ __global__ void mppiKernel(ControlInput *controlSamples, double *costs, const Co
 
     // first we need the control sequence for this horizon
     ControlInput controls[30];
-    for (int t = 0; t < horizon; ++t)
+    for (int t = 0; t < config->horizon; ++t)
     {
-        float accelNoise = curand_normal(&localState) * sigmaAccel;
-        float steerNoise = curand_normal(&localState) * sigmaSteering;
+        float accelNoise = curand_normal(&localState) * config->sigmaAcceleration;
+        float steerNoise = curand_normal(&localState) * config->sigmaSteering;
 
         controls[t].acceleration = nominalControlSequence[t].acceleration + accelNoise;
         controls[t].steering = nominalControlSequence[t].steering + steerNoise;
@@ -38,16 +38,16 @@ __global__ void mppiKernel(ControlInput *controlSamples, double *costs, const Co
         controls[t].steering = clamp(controls[t].steering, params->minSteeringAngle, params->maxSteeringAngle);
 
         // store in global memory for next iteration
-        controlSamples[k * horizon + t] = controls[t];
+        controlSamples[k * config->horizon + t] = controls[t];
     }
 
     VehicleState rollingState = *currState;
     VehicleParams p = *params;
     CostWeights w = *weights;
     double cost = 0;
-    for (int i = 0; i < horizon; i++)
+    for (int i = 0; i < config->horizon; i++)
     {
-        rollingState = stepDynamics(rollingState, p, controls[i], dt);
+        rollingState = stepDynamics(rollingState, p, controls[i], config->dt);
         cost += computeCost(rollingState, refTrajectory[i], controls[i], w);
 
         if (i > 0)
@@ -91,9 +91,9 @@ void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int blo
     cudaDeviceSynchronize();
 }
 
-void launchMPPIKernel(ControlInput *d_controlSamples, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int samples, int horizon, float dt, float sigmaAccel, float sigmaSteering, int grid, int block)
+void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig *config, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block)
 {
-    mppiKernel<<<grid, block>>>(d_controlSamples, d_costs, d_nominalSequence, d_refTraj, d_currState, d_weights, d_params, d_rngStates, samples, horizon, dt, sigmaAccel, sigmaSteering);
+    mppiKernel<<<grid, block>>>(d_controlSamples, config, d_costs, d_nominalSequence, d_refTraj, d_currState, d_weights, d_params, d_rngStates);
     cudaDeviceSynchronize();
 }
 
