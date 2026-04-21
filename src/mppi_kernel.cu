@@ -11,7 +11,7 @@ __global__ void setupRNG(curandState *states, unsigned long seed)
     curand_init(seed, idx, 0, &states[idx]);
 }
 
-__global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states)
+__global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, CostmapInfo *map, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states)
 {
     // each thread will handle 1 of the MPPI samples
     int k = threadIdx.x + blockIdx.x * blockDim.x;
@@ -48,7 +48,7 @@ __global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, dou
     for (int i = 0; i < config->horizon; i++)
     {
         rollingState = stepDynamics(rollingState, p, controls[i], config->dt);
-        cost += computeCost(rollingState, refTrajectory[i], controls[i], w);
+        cost += computeCost(rollingState, refTrajectory[i], controls[i], w, *map);
 
         if (i > 0)
         {
@@ -91,9 +91,9 @@ void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int blo
     cudaDeviceSynchronize();
 }
 
-void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig *config, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block)
+void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig *config, CostmapInfo *map, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block)
 {
-    mppiKernel<<<grid, block>>>(d_controlSamples, config, d_costs, d_nominalSequence, d_refTraj, d_currState, d_weights, d_params, d_rngStates);
+    mppiKernel<<<grid, block>>>(d_controlSamples, config, map, d_costs, d_nominalSequence, d_refTraj, d_currState, d_weights, d_params, d_rngStates);
     cudaDeviceSynchronize();
 }
 

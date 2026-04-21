@@ -57,21 +57,6 @@ void MPPI_Controller::trajectoryCallback(const autoware_auto_planning_msgs::msg:
 void MPPI_Controller::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
     map = msg;
-
-    // copy grid data to device
-    cudaMemcpy(d_costmap_data, map->data.data(), grid_size * sizeof(int8_t), cudaMemcpyHostToDevice);
-
-    // build struct with device pointer
-    CostmapInfo costmap_info;
-    costmap_info.data = d_costmap_data; // device pointer, allocated once in constructor
-    costmap_info.height = map->info.height;
-    costmap_info.width = map->info.width;
-    costmap_info.resolution = map->info.resolution;
-    costmap_info.origin_offset = costmap_size / 2.0f;
-    costmap_info.lethal_cost = 100;
-
-    // copy struct to device
-    cudaMemcpy(d_costmap_info, &costmap_info, sizeof(CostmapInfo), cudaMemcpyHostToDevice);
 }
 
 void MPPI_Controller::loadParameters()
@@ -259,24 +244,43 @@ void MPPI_Controller::updateTraj(const autoware_auto_planning_msgs::msg::Traject
     }
 }
 
+void MPPI_Controller::updateMap(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
+{
+    // copy grid data to device
+    cudaMemcpy(d_costmap_data, map->data.data(), grid_size * sizeof(int8_t), cudaMemcpyHostToDevice);
+
+    // build struct with device pointer
+    CostmapInfo costmap_info;
+    costmap_info.data = d_costmap_data; // device pointer, allocated once in constructor
+    costmap_info.height = map->info.height;
+    costmap_info.width = map->info.width;
+    costmap_info.resolution = map->info.resolution;
+    costmap_info.origin_offset = costmap_size / 2.0f;
+    costmap_info.lethal_cost = 100;
+
+    // copy struct to device
+    cudaMemcpy(d_costmap_info, &costmap_info, sizeof(CostmapInfo), cudaMemcpyHostToDevice);
+}
+
 void MPPI_Controller::updateControl()
 {
     // safety check for data available
-    if (!odom || !traj)
+    if (!odom || !traj || !map)
     {
-        RCLCPP_INFO(this->get_logger(), "Waiting for odometry or trajectory");
+        RCLCPP_INFO(this->get_logger(), "Waiting for odometry or trajectory or map");
         return;
     }
 
-    // update the state and strajectory
+    // update the state and strajectory and costmap information
     try
     {
         updateState(odom);
         updateTraj(traj);
+        updateMap(map);
     }
     catch (...)
     {
-        RCLCPP_ERROR(this->get_logger(), "Caught error attempting to update vehicle state");
+        RCLCPP_ERROR(this->get_logger(), "Caught error attempting to update from callback information");
         return;
     }
 
@@ -298,7 +302,7 @@ void MPPI_Controller::updateControl()
     cudaMemcpy(d_currState, &state, sizeof(VehicleState), cudaMemcpyHostToDevice);
 
     // cost function is the error
-    launchMPPIKernel(d_controls, d_mppi_config, d_costs, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates, grid, block);
+    launchMPPIKernel(d_controls, d_mppi_config, d_costmap_info, d_costs, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates, grid, block);
 
     launchThrustWeighting(d_costs, samples, temperature);
 

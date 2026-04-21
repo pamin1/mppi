@@ -8,6 +8,8 @@ void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int blo
 /**
  * @brief Creates the distribution of inputs for a single timestep. Timesteps are iterated on CPU, this computes the cost to go for the timestep on GPU
  * @param controlSamples Output array of sample control inputs
+ * @param config Struct of the MPPI configuration
+ * @param map Struct of Costmap information
  * @param costs Output array of rollout costs
  * @param nominalControlSequence Input array of previous control sequence to build on
  * @param refTrajectory Input array of optimized path planning trajectory points
@@ -22,7 +24,7 @@ void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int blo
  * @param grid Size of grid
  * @param block Size of block
  */
-void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig *config, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block);
+void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig *config, CostmapInfo *map, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block);
 
 /**
  * @brief Executes the thrust device functions
