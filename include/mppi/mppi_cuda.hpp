@@ -10,6 +10,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <random>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
@@ -25,13 +26,16 @@ class MPPI_Controller : public rclcpp::Node
     void updateState(const nav_msgs::msg::Odometry::SharedPtr odom);
     void updateTraj(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj);
     void updateMap(const nav_msgs::msg::OccupancyGrid::SharedPtr map);
+    void updateScan(const sensor_msgs::msg::LaserScan::SharedPtr scan);
 
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void trajectoryCallback(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr msg);
     void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+    void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
 
     void updateControl();
     void publishTopKPaths(const std::vector<double> &weights, const std::vector<ControlInput> &allControls);
+    void publishModes(const std::vector<Gaussian> &modes, const rclcpp::Time &stamp);
 
   private:
     // controller set up
@@ -96,10 +100,12 @@ class MPPI_Controller : public rclcpp::Node
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
     rclcpp::Subscription<autoware_auto_planning_msgs::msg::Trajectory>::SharedPtr trajSub;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr mapSub;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scanSub;
 
     // publishers
     rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr controllerPub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr vizPub;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr modePub;
 
     // timer
     rclcpp::TimerBase::SharedPtr controlTimer;
@@ -108,4 +114,5 @@ class MPPI_Controller : public rclcpp::Node
     nav_msgs::msg::Odometry::SharedPtr odom;
     autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj;
     nav_msgs::msg::OccupancyGrid::SharedPtr map;
+    sensor_msgs::msg::LaserScan::SharedPtr scan;
 };

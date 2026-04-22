@@ -15,11 +15,13 @@ MPPI_Controller::MPPI_Controller()
     odomSub = this->create_subscription<nav_msgs::msg::Odometry>("/ego_racecar/odom", 10, std::bind(&MPPI_Controller::odomCallback, this, std::placeholders::_1));
     trajSub = this->create_subscription<autoware_auto_planning_msgs::msg::Trajectory>("/planner_traj", 10, std::bind(&MPPI_Controller::trajectoryCallback, this, std::placeholders::_1));
     mapSub = this->create_subscription<nav_msgs::msg::OccupancyGrid>("/local_costmap", 10, std::bind(&MPPI_Controller::mapCallback, this, std::placeholders::_1));
+    scanSub = this->create_subscription<sensor_msgs::msg::LaserScan>("/scan", 10, std::bind(&MPPI_Controller::scanCallback, this, std::placeholders::_1));
 
     // publishers
     controllerPub = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/drive", 10);
     vizPub = this->create_publisher<visualization_msgs::msg::MarkerArray>("/mppi/top_k_paths", 10);
-
+    modePub = this->create_publisher<visualization_msgs::msg::MarkerArray>("/mppi/steering_modes", 10);
+    
     // timer
     controlTimer = this->create_wall_timer(std::chrono::duration<float>(dt), std::bind(&MPPI_Controller::updateControl, this));
     RCLCPP_INFO(this->get_logger(), "MPPI Controller initialized successfully");
@@ -57,6 +59,11 @@ void MPPI_Controller::trajectoryCallback(const autoware_auto_planning_msgs::msg:
 void MPPI_Controller::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
     map = msg;
+}
+
+void MPPI_Controller::scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
+{
+    scan = msg;
 }
 
 void MPPI_Controller::loadParameters()
@@ -121,7 +128,7 @@ void MPPI_Controller::loadParameters()
     mppi_config.horizon = horizon;
     mppi_config.dt = dt;
     mppi_config.sigmaAcceleration = sigmaAcceleration;
-    mppi_config.sigmaSteering= sigmaSteering;
+    mppi_config.sigmaSteering = sigmaSteering;
 
     weights.qX = this->get_parameter("cost_weights.q_x").as_double();
     weights.qY = this->get_parameter("cost_weights.q_y").as_double();
@@ -262,12 +269,47 @@ void MPPI_Controller::updateMap(const nav_msgs::msg::OccupancyGrid::SharedPtr ma
     cudaMemcpy(d_costmap_info, &costmap_info, sizeof(CostmapInfo), cudaMemcpyHostToDevice);
 }
 
+void MPPI_Controller::updateScan(const sensor_msgs::msg::LaserScan::SharedPtr scan)
+{
+    // laserscan gap finding
+    float r_min = 3.0;
+    gaps = findGaps(scan, r_min);
+    int num_gaps = gaps.size();
+    RCLCPP_INFO(this->get_logger(), "Num Gaps: %d", static_cast<int>(gaps.size()));
+
+    // Build ranges: 0 outside gaps, original range inside gaps
+    std::vector<float> gap_ranges(scan->ranges.size(), 0.0f);
+
+    std::vector<Gaussian> modes;
+    modes.reserve(num_gaps);
+
+    for (int i = 0; i < gaps.size(); i++)
+    {
+        for (int j = gaps[i].start; j <= gaps[i].end; j++)
+        {
+            gap_ranges[j] = scan->ranges[j];
+        }
+
+        // gap finding
+        int mid_idx = (gaps[i].start + gaps[i].end) / 2;
+        float angle = scan->angle_min + mid_idx * scan->angle_increment;
+
+        Gaussian mode;
+        mode.mean = angle;
+        mode.std_dev = 0.05; // can modify later
+        modes.push_back(mode);
+        RCLCPP_INFO(this->get_logger(), "Gap %d: start=%d, end=%d, angle=%f", i, gaps[i].start, gaps[i].end, angle);
+    }
+
+    publishModes(modes, scan->header.stamp);
+}
+
 void MPPI_Controller::updateControl()
 {
     // safety check for data available
-    if (!odom || !traj || !map)
+    if (!odom || !traj || !map || !scan)
     {
-        RCLCPP_INFO(this->get_logger(), "Waiting for odometry or trajectory or map");
+        RCLCPP_INFO(this->get_logger(), "Waiting for odometry or trajectory or map or scan");
         return;
     }
 
@@ -277,6 +319,7 @@ void MPPI_Controller::updateControl()
         updateState(odom);
         updateTraj(traj);
         updateMap(map);
+        updateScan(scan);
     }
     catch (...)
     {
@@ -327,10 +370,10 @@ void MPPI_Controller::updateControl()
     ackermann_msgs::msg::AckermannDriveStamped msg;
     msg.header.stamp = this->now();
     msg.header.frame_id = baseFrame;
-    msg.drive.speed = std::clamp(static_cast<float>(state.vx + control.acceleration * dt), 
-                                  -params.maxVelocity, params.maxVelocity);
+    msg.drive.speed = std::clamp(static_cast<float>(state.vx + control.acceleration * dt),
+                                 -params.maxVelocity, params.maxVelocity);
     msg.drive.steering_angle = control.steering;
-    controllerPub->publish(msg);
+    // controllerPub->publish(msg);
 
     // copy the optimal controls back to the nominal control input
     // shift left by 1, repeat last entry
@@ -400,6 +443,86 @@ void MPPI_Controller::publishTopKPaths(const std::vector<double> &weights, const
     }
 
     vizPub->publish(markerArray);
+}
+
+void MPPI_Controller::publishModes(const std::vector<Gaussian> &modes, const rclcpp::Time &stamp)
+{
+    visualization_msgs::msg::MarkerArray marker_array;
+    std::string costmap_frame_ = "ego_racecar/laser_model";
+    
+    // Clear previous markers
+    visualization_msgs::msg::Marker clear;
+    clear.header.stamp = stamp;
+    clear.header.frame_id = costmap_frame_;
+    clear.ns = "steering_modes";
+    clear.action = visualization_msgs::msg::Marker::DELETEALL;
+    marker_array.markers.push_back(clear);
+
+    if (gaps.empty())
+    {
+        modePub->publish(marker_array);
+        return;
+    }
+
+    // Compute mode endpoints and scores
+    struct Point
+    {
+        double x;
+        double y;
+        double score;
+    };
+    std::vector<Point> points;
+    points.reserve(gaps.size());
+
+    for (const auto &mode : modes)
+    {
+        float angle = mode.mean;
+        float range = 2.0;
+
+        points.push_back({
+            static_cast<double>(range * std::cos(angle)),
+            static_cast<double>(range * std::sin(angle)),
+            static_cast<double>(mode.std_dev) // width as score
+        });
+    }
+
+    for (size_t i = 0; i < modes.size(); ++i)
+    {
+        visualization_msgs::msg::Marker m;
+        m.header.stamp = stamp;
+        m.header.frame_id = costmap_frame_;
+        m.ns = "steering_modes";
+        m.id = static_cast<int>(i);
+        m.type = visualization_msgs::msg::Marker::ARROW;
+        m.action = visualization_msgs::msg::Marker::ADD;
+
+        geometry_msgs::msg::Point start;
+        start.x = 0.0;
+        start.y = 0.0;
+        start.z = 0.1;
+        geometry_msgs::msg::Point end;
+        end.x = points[i].x;
+        end.y = points[i].y;
+        end.z = 0.1;
+        m.points.push_back(start);
+        m.points.push_back(end);
+
+        m.scale.x = 0.05;
+        m.scale.y = 0.10;
+        m.scale.z = 0.08;
+
+        m.color.r = 1.0;
+        m.color.g = 0.0;
+        m.color.b = 0.0;
+        m.color.a = 0.9;
+
+        m.lifetime.sec = 0;
+        m.lifetime.nanosec = 100000000; // 0.1s
+
+        marker_array.markers.push_back(m);
+    }
+
+    modePub->publish(marker_array);
 }
 
 int main(int argc, char **argv)
