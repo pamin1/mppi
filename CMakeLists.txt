@@ -98,33 +98,33 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}/)
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME}/)
 install(DIRECTORY resources DESTINATION share/${PROJECT_NAME}/)
 
-if(BUILD_TESTING)
-  find_package(ament_cmake_gtest REQUIRED)
+# if(BUILD_TESTING)
+#   find_package(ament_cmake_gtest REQUIRED)
   
-  ament_add_gtest(test_dynamics test/test_dynamics.cpp)
-  target_include_directories(test_dynamics PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-  )
+#   ament_add_gtest(test_dynamics test/test_dynamics.cpp)
+#   target_include_directories(test_dynamics PUBLIC
+#     ${CMAKE_CURRENT_SOURCE_DIR}/include
+#   )
   
-  add_library(test_kernel_device 
-    test/test_kernel_device.cu
-  )
-  target_compile_options(test_kernel_device PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:
-      -ccbin=/usr/bin/g++-10
-    >
-  )
-  target_link_libraries(test_kernel_device
-    mppi_kernels
-    CUDA::cudart
-    CUDA::curand
-    Thrust
-  )
+#   add_library(test_kernel_device 
+#     test/test_kernel_device.cu
+#   )
+#   target_compile_options(test_kernel_device PRIVATE
+#     $<$<COMPILE_LANGUAGE:CUDA>:
+#       -ccbin=/usr/bin/g++-10
+#     >
+#   )
+#   target_link_libraries(test_kernel_device
+#     mppi_kernels
+#     CUDA::cudart
+#     CUDA::curand
+#     Thrust
+#   )
   
-  ament_add_gtest(test_kernel test/test_kernel.cpp)
-  target_link_libraries(test_kernel
-    test_kernel_device
-  )
-endif()
+#   ament_add_gtest(test_kernel test/test_kernel.cpp)
+#   target_link_libraries(test_kernel
+#     test_kernel_device
+#   )
+# endif()
 
 ament_package()

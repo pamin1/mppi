@@ -11,12 +11,12 @@ __global__ void setupRNG(curandState *states, unsigned long seed)
     curand_init(seed, idx, 0, &states[idx]);
 }
 
-__global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, CostmapInfo *map, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states)
+__global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig config, CostmapInfo *map, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states)
 {
     // each thread will handle 1 of the MPPI samples
     int k = threadIdx.x + blockIdx.x * blockDim.x;
 
-    if (k >= config->samples)
+    if (k >= config.samples)
     {
         return;
     }
@@ -26,28 +26,28 @@ __global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, Cos
 
     // first we need the control sequence for this horizon
     ControlInput controls[30];
-    for (int t = 0; t < config->horizon; ++t)
+    for (int t = 0; t < config.horizon; ++t)
     {
-        float accelNoise = curand_normal(&localState) * config->sigmaAcceleration;
-        float steerNoise = curand_normal(&localState) * config->sigmaSteering;
+        float accelNoise = curand_normal(&localState) * config.sigmaAcceleration;
+        float steerNoise = curand_normal(&localState) * config.sigmaSteering;
 
         controls[t].acceleration = nominalControlSequence[t].acceleration + accelNoise;
-        controls[t].steering = nominalControlSequence[t].steering + steerNoise;
+        controls[t].steering = config.steeringBias + steerNoise;
 
         controls[t].acceleration = clamp(controls[t].acceleration, params->minAcceleration, params->maxAcceleration);
         controls[t].steering = clamp(controls[t].steering, params->minSteeringAngle, params->maxSteeringAngle);
 
         // store in global memory for next iteration
-        controlSamples[k * config->horizon + t] = controls[t];
+        controlSamples[k * config.horizon + t] = controls[t];
     }
 
     VehicleState rollingState = *currState;
     VehicleParams p = *params;
     CostWeights w = *weights;
     double cost = 0;
-    for (int i = 0; i < config->horizon; i++)
+    for (int i = 0; i < config.horizon; i++)
     {
-        rollingState = stepDynamics(rollingState, p, controls[i], config->dt);
+        rollingState = stepDynamics(rollingState, p, controls[i], config.dt);
         cost += computeCost(rollingState, refTrajectory[i], controls[i], w, *map);
 
         if (i > 0)
@@ -91,30 +91,27 @@ void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int blo
     cudaDeviceSynchronize();
 }
 
-void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig *config, CostmapInfo *map, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block)
+void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig config, CostmapInfo *map, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block, cudaStream_t stream)
 {
-    mppiKernel<<<grid, block>>>(d_controlSamples, config, map, d_costs, d_nominalSequence, d_refTraj, d_currState, d_weights, d_params, d_rngStates);
-    cudaDeviceSynchronize();
+    mppiKernel<<<grid, block, 0, stream>>>(d_controlSamples, config, map, d_costs, d_nominalSequence, d_refTraj, d_currState, d_weights, d_params, d_rngStates);
+    // cudaDeviceSynchronize();
 }
 
-void launchThrustWeighting(double *d_costs, int samples, float temperature)
+double launchThrustWeighting(double *d_costs, int samples, float temperature, cudaStream_t stream)
 {
-    // use thrust to do parallel reductions and cost weighting
-    // reduce for min cost
-    double minCost = thrust::reduce(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), INFINITY, thrust::minimum<double>());
+    double minCost = thrust::reduce(thrust::cuda::par.on(stream), thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), INFINITY, thrust::minimum<double>());
+    
+    thrust::transform(thrust::cuda::par.on(stream), thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), thrust::device_pointer_cast(d_costs), weightFunctor(minCost, temperature));
 
-    // exponential weighting functor to transform the cost array
-    thrust::transform(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), thrust::device_pointer_cast(d_costs), weightFunctor(minCost, temperature));
+    double weightSum = thrust::reduce(thrust::cuda::par.on(stream), thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples));
 
-    // sum to get the sum of the weights
-    double weightSum = thrust::reduce(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples));
+    thrust::transform(thrust::cuda::par.on(stream), thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), thrust::device_pointer_cast(d_costs), thrust::placeholders::_1 / weightSum);
 
-    // normalize the weighted costs
-    thrust::transform(thrust::device_pointer_cast(d_costs), thrust::device_pointer_cast(d_costs + samples), thrust::device_pointer_cast(d_costs), thrust::placeholders::_1 / weightSum);
+    return minCost;
 }
 
-void launchAggregateControls(ControlInput *d_optimalControls, const ControlInput *d_sampleControls, const ControlInput *d_nominalControls, const double *d_weightedCosts, float alpha, int samples, int horizon, int grid, int block)
+void launchAggregateControls(ControlInput *d_optimalControls, const ControlInput *d_sampleControls, const ControlInput *d_nominalControls, const double *d_weightedCosts, float alpha, int samples, int horizon, int grid, int block, cudaStream_t stream)
 {
-    aggregateControls<<<grid, block>>>(d_optimalControls, d_sampleControls, d_nominalControls, d_weightedCosts, alpha, samples, horizon);
-    cudaDeviceSynchronize();
+    aggregateControls<<<grid, block, 0, stream>>>(d_optimalControls, d_sampleControls, d_nominalControls, d_weightedCosts, alpha, samples, horizon);
+    // cudaDeviceSynchronize();
 }

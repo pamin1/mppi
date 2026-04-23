@@ -21,7 +21,7 @@ MPPI_Controller::MPPI_Controller()
     controllerPub = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/drive", 10);
     vizPub = this->create_publisher<visualization_msgs::msg::MarkerArray>("/mppi/top_k_paths", 10);
     modePub = this->create_publisher<visualization_msgs::msg::MarkerArray>("/mppi/steering_modes", 10);
-    
+
     // timer
     controlTimer = this->create_wall_timer(std::chrono::duration<float>(dt), std::bind(&MPPI_Controller::updateControl, this));
     RCLCPP_INFO(this->get_logger(), "MPPI Controller initialized successfully");
@@ -42,6 +42,12 @@ MPPI_Controller::~MPPI_Controller()
     cudaFree(d_costs);
     cudaFree(d_costmap_data);
     cudaFree(d_costmap_info);
+
+    for (int i = 0; i < MAX_MODES; i++)
+    {
+        cudaFree(d_optimal_per_mode[i]);
+        cudaStreamDestroy(streams[i]);
+    }
 
     RCLCPP_INFO(this->get_logger(), "CUDA memory freed");
 }
@@ -123,12 +129,11 @@ void MPPI_Controller::loadParameters()
     sigmaAcceleration = this->get_parameter("mppi.accel_dist").as_double();
     sigmaSteering = this->get_parameter("mppi.steer_dist").as_double();
 
-    MPPIConfig mppi_config;
-    mppi_config.samples = samples;
-    mppi_config.horizon = horizon;
-    mppi_config.dt = dt;
-    mppi_config.sigmaAcceleration = sigmaAcceleration;
-    mppi_config.sigmaSteering = sigmaSteering;
+    config.samples = samples;
+    config.horizon = horizon;
+    config.dt = dt;
+    config.sigmaAcceleration = sigmaAcceleration;
+    config.sigmaSteering = sigmaSteering;
 
     weights.qX = this->get_parameter("cost_weights.q_x").as_double();
     weights.qY = this->get_parameter("cost_weights.q_y").as_double();
@@ -171,7 +176,6 @@ void MPPI_Controller::loadParameters()
     RCLCPP_INFO(this->get_logger(), "  r_steering_rate: %.3f", weights.rSteeringRate);
 
     // set up GPU arrays
-    CHECK_ERROR(cudaMalloc((void **)&d_mppi_config, sizeof(MPPIConfig)));
     CHECK_ERROR(cudaMalloc((void **)&d_optimalControls, sizeof(ControlInput) * horizon));
     CHECK_ERROR(cudaMalloc((void **)&d_nominalControls, sizeof(ControlInput) * horizon));
     CHECK_ERROR(cudaMalloc((void **)&d_refTraj, sizeof(VehicleState) * horizon));
@@ -187,7 +191,12 @@ void MPPI_Controller::loadParameters()
     // copy fixed values over
     cudaMemcpy(d_weights, &weights, sizeof(CostWeights), cudaMemcpyHostToDevice);
     cudaMemcpy(d_params, &params, sizeof(VehicleParams), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_mppi_config, &mppi_config, sizeof(MPPIConfig), cudaMemcpyHostToDevice);
+
+    for (int i = 0; i < MAX_MODES; i++)
+    {
+        cudaStreamCreate(&streams[i]);
+        CHECK_ERROR(cudaMalloc(&d_optimal_per_mode[i], sizeof(ControlInput) * horizon));
+    }
 
     block = 512;
     grid = (samples + block - 1) / block;
@@ -275,12 +284,12 @@ void MPPI_Controller::updateScan(const sensor_msgs::msg::LaserScan::SharedPtr sc
     float r_min = 3.0;
     gaps = findGaps(scan, r_min);
     int num_gaps = gaps.size();
-    RCLCPP_INFO(this->get_logger(), "Num Gaps: %d", static_cast<int>(gaps.size()));
+    // RCLCPP_INFO(this->get_logger(), "Num Gaps: %d", static_cast<int>(gaps.size()));
 
     // Build ranges: 0 outside gaps, original range inside gaps
     std::vector<float> gap_ranges(scan->ranges.size(), 0.0f);
 
-    std::vector<Gaussian> modes;
+    modes.clear();
     modes.reserve(num_gaps);
 
     for (int i = 0; i < gaps.size(); i++)
@@ -292,16 +301,17 @@ void MPPI_Controller::updateScan(const sensor_msgs::msg::LaserScan::SharedPtr sc
 
         // gap finding
         int mid_idx = (gaps[i].start + gaps[i].end) / 2;
-        float angle = scan->angle_min + mid_idx * scan->angle_increment;
+        double angle = scan->angle_min + mid_idx * scan->angle_increment;
+
+        RCLCPP_INFO(this->get_logger(), "Gap %d: start=%d, end=%d, angle=%f", i, gaps[i].start, gaps[i].end, angle);
+
+        // angle = static_cast<float>(std::clamp(angle, -0.01, 0.01));
 
         Gaussian mode;
         mode.mean = angle;
-        mode.std_dev = 0.05; // can modify later
+        mode.std_dev = sigmaSteering; // can modify later
         modes.push_back(mode);
-        RCLCPP_INFO(this->get_logger(), "Gap %d: start=%d, end=%d, angle=%f", i, gaps[i].start, gaps[i].end, angle);
     }
-
-    publishModes(modes, scan->header.stamp);
 }
 
 void MPPI_Controller::updateControl()
@@ -344,112 +354,117 @@ void MPPI_Controller::updateControl()
     cudaMemcpy(d_refTraj, trajectory.data(), sizeof(VehicleState) * horizon, cudaMemcpyHostToDevice);
     cudaMemcpy(d_currState, &state, sizeof(VehicleState), cudaMemcpyHostToDevice);
 
-    // cost function is the error
-    launchMPPIKernel(d_controls, d_mppi_config, d_costmap_info, d_costs, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates, grid, block);
-
-    launchThrustWeighting(d_costs, samples, temperature);
-
-    if (enableViz)
-    {
-        std::vector<double> weights(samples);
-        std::vector<ControlInput> allControls(samples * horizon);
-        cudaMemcpy(weights.data(), d_costs, sizeof(double) * samples, cudaMemcpyDeviceToHost);
-        cudaMemcpy(allControls.data(), d_controls, sizeof(ControlInput) * samples * horizon, cudaMemcpyDeviceToHost);
-        publishTopKPaths(weights, allControls);
-    }
-
     int agg_block = 32;
     int agg_grid = (horizon + agg_block - 1) / agg_block;
-    launchAggregateControls(d_optimalControls, d_controls, d_nominalControls, d_costs, alpha, samples, horizon, agg_grid, agg_block);
+    int num_modes = std::min(static_cast<int>(modes.size()), MAX_MODES);
+    int samples_per_mode = samples / num_modes;
+    double mode_min_costs[MAX_MODES];
 
-    // d_optimalControls now has a single optimal control sequence + blended with nominal control for smoothness
+    for (int m = 0; m < num_modes; m++)
+    {
+        int offset = m * samples_per_mode;
+
+        MPPIConfig mode_config = config; // copy base config
+        mode_config.samples = samples_per_mode;
+        mode_config.sigmaSteering = modes[m].std_dev;
+        mode_config.steeringBias = modes[m].mean;
+        RCLCPP_INFO(this->get_logger(), "Angle: %.4f, Std Dev: %.4f", modes[m].mean, modes[m].std_dev);
+
+        int mode_grid = (samples_per_mode + block - 1) / block;
+
+        launchMPPIKernel(d_controls + offset * horizon, mode_config, d_costmap_info, d_costs + offset, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates + offset, mode_grid, block, streams[m]);
+
+        mode_min_costs[m] = launchThrustWeighting(d_costs + offset, samples_per_mode, temperature, streams[m]);
+
+        launchAggregateControls(d_optimal_per_mode[m], d_controls + offset * horizon, d_nominalControls, d_costs + offset, alpha, samples_per_mode, horizon, agg_grid, agg_block, streams[m]);
+    }
+
+    for (int m = 0; m < num_modes; m++)
+    {
+        cudaStreamSynchronize(streams[m]);
+    }
+
+    int best = 0;
+    for (int m = 1; m < num_modes; m++)
+    {
+        if (mode_min_costs[m] < mode_min_costs[best])
+            best = m;
+    }
+
     ControlInput control;
-    cudaMemcpy(&control, d_optimalControls, sizeof(ControlInput), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&control, d_optimal_per_mode[best], sizeof(ControlInput), cudaMemcpyDeviceToHost);
 
     // publish the control
     ackermann_msgs::msg::AckermannDriveStamped msg;
     msg.header.stamp = this->now();
     msg.header.frame_id = baseFrame;
-    msg.drive.speed = std::clamp(static_cast<float>(state.vx + control.acceleration * dt),
-                                 -params.maxVelocity, params.maxVelocity);
+    msg.drive.speed = std::clamp(static_cast<float>(state.vx + control.acceleration * dt), -params.maxVelocity, params.maxVelocity);
     msg.drive.steering_angle = control.steering;
-    // controllerPub->publish(msg);
+    controllerPub->publish(msg);
+
+    publishBestPath(best);
+    publishModes(modes, scan->header.stamp, best);
 
     // copy the optimal controls back to the nominal control input
     // shift left by 1, repeat last entry
-    cudaMemcpy(d_nominalControls, d_optimalControls + 1, sizeof(ControlInput) * (horizon - 1), cudaMemcpyDeviceToDevice);
-    cudaMemcpy(d_nominalControls + (horizon - 1), d_optimalControls + (horizon - 1), sizeof(ControlInput), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_nominalControls, d_optimal_per_mode[best] + 1,
+               sizeof(ControlInput) * (horizon - 1), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_nominalControls + (horizon - 1), d_optimal_per_mode[best] + (horizon - 1),
+               sizeof(ControlInput), cudaMemcpyDeviceToDevice);
 }
 
-void MPPI_Controller::publishTopKPaths(const std::vector<double> &weights, const std::vector<ControlInput> &allControls)
+void MPPI_Controller::publishBestPath(int best_mode)
 {
-    int k = std::min(topKPaths, samples);
-
-    // Find top-k sample indices by highest weight (higher weight = lower cost = better path)
-    std::vector<int> indices(samples);
-    std::iota(indices.begin(), indices.end(), 0);
-    std::partial_sort(indices.begin(), indices.begin() + k, indices.end(),
-                      [&weights](int a, int b)
-                      { return weights[a] > weights[b]; });
-
     visualization_msgs::msg::MarkerArray markerArray;
 
-    // Delete stale markers from previous publish (in case k shrank)
     visualization_msgs::msg::Marker deleteAll;
     deleteAll.action = visualization_msgs::msg::Marker::DELETEALL;
     markerArray.markers.push_back(deleteAll);
 
-    for (int rank = 0; rank < k; ++rank)
+    // copy the winning mode's full optimal sequence to host
+    std::vector<ControlInput> bestControls(horizon);
+    cudaMemcpy(bestControls.data(), d_optimal_per_mode[best_mode],
+               sizeof(ControlInput) * horizon, cudaMemcpyDeviceToHost);
+
+    visualization_msgs::msg::Marker marker;
+    marker.header.stamp = this->now();
+    marker.header.frame_id = mapFrame;
+    marker.ns = "mppi_best_path";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.scale.x = vizLineWidth;
+    marker.pose.orientation.w = 1.0;
+    marker.color.r = 0.0f;
+    marker.color.g = 1.0f;
+    marker.color.b = 0.0f;
+    marker.color.a = vizPathAlpha;
+
+    VehicleState simState = state;
+    geometry_msgs::msg::Point pt;
+    pt.x = simState.x;
+    pt.y = simState.y;
+    pt.z = 0.0;
+    marker.points.push_back(pt);
+
+    for (int t = 0; t < horizon; ++t)
     {
-        int sampleIdx = indices[rank];
-
-        visualization_msgs::msg::Marker marker;
-        marker.header.stamp = this->now();
-        marker.header.frame_id = mapFrame;
-        marker.ns = "mppi_paths";
-        marker.id = rank;
-        marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-        marker.action = visualization_msgs::msg::Marker::ADD;
-        marker.scale.x = vizLineWidth;
-        marker.pose.orientation.w = 1.0;
-
-        // Green (rank 0, best) -> Red (rank k-1, worst of top-k)
-        float t = (k > 1) ? static_cast<float>(rank) / static_cast<float>(k - 1) : 0.0f;
-        marker.color.r = t;
-        marker.color.g = 1.0f - t;
-        marker.color.b = 0.0f;
-        marker.color.a = vizPathAlpha;
-
-        // Simulate trajectory forward from current state using this sample's controls
-        VehicleState simState = state;
-
-        geometry_msgs::msg::Point pt;
+        simState = stepDynamics(simState, params, bestControls[t], dt);
         pt.x = simState.x;
         pt.y = simState.y;
         pt.z = 0.0;
         marker.points.push_back(pt);
-
-        for (int t_step = 0; t_step < horizon; ++t_step)
-        {
-            const ControlInput &ctrl = allControls[sampleIdx * horizon + t_step];
-            simState = stepDynamics(simState, params, ctrl, dt);
-            pt.x = simState.x;
-            pt.y = simState.y;
-            pt.z = 0.0;
-            marker.points.push_back(pt);
-        }
-
-        markerArray.markers.push_back(marker);
     }
 
+    markerArray.markers.push_back(marker);
     vizPub->publish(markerArray);
 }
 
-void MPPI_Controller::publishModes(const std::vector<Gaussian> &modes, const rclcpp::Time &stamp)
+void MPPI_Controller::publishModes(const std::vector<Gaussian> &modes, const rclcpp::Time &stamp, int best_mode)
 {
     visualization_msgs::msg::MarkerArray marker_array;
     std::string costmap_frame_ = "ego_racecar/laser_model";
-    
+
     // Clear previous markers
     visualization_msgs::msg::Marker clear;
     clear.header.stamp = stamp;
@@ -511,9 +526,18 @@ void MPPI_Controller::publishModes(const std::vector<Gaussian> &modes, const rcl
         m.scale.y = 0.10;
         m.scale.z = 0.08;
 
-        m.color.r = 1.0;
-        m.color.g = 0.0;
-        m.color.b = 0.0;
+        if (static_cast<int>(i) == best_mode)
+        {
+            m.color.r = 0.0;
+            m.color.g = 1.0;
+            m.color.b = 0.0;
+        }
+        else
+        {
+            m.color.r = 1.0;
+            m.color.g = 0.0;
+            m.color.b = 0.0;
+        }
         m.color.a = 0.9;
 
         m.lifetime.sec = 0;

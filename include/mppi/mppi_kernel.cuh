@@ -55,7 +55,7 @@ __device__ bool checkCollision(const CostmapInfo &map, float x, float y)
 
     if (gx >= 0 && gx < map.width && gy >= 0 && gy < map.height)
     {
-        return map.data[gy * map.width + gx] >= 128;
+        return map.data[gy * map.width + gx] > 0;
     }
     return true; // out of bounds = collision
 }
@@ -97,7 +97,7 @@ __device__ __forceinline__ double computeCost(const VehicleState &predicted, con
  * @param params Vehicle model parameters
  * @param states cuRAND states for RNG
  */
-__global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, CostmapInfo *map, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states);
+__global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig config, CostmapInfo *map, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states);
 
 /**
  * @brief Computes the weigthed optimal control input for each time step in the horizon

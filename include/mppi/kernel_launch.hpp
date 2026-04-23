@@ -23,16 +23,19 @@ void launchSetupRNG(curandState *d_states, unsigned long seed, int grid, int blo
  * @param sigmaSteering Standard Deviation for steering
  * @param grid Size of grid
  * @param block Size of block
+ * @param stream cudaStream association for the kernel launch
  */
-void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig *config, CostmapInfo *map, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block);
+void launchMPPIKernel(ControlInput *d_controlSamples, MPPIConfig config, CostmapInfo *map, double *d_costs, const ControlInput *d_nominalSequence, const VehicleState *d_refTraj, const VehicleState *d_currState, const CostWeights *d_weights, const VehicleParams *d_params, curandState *d_rngStates, int grid, int block, cudaStream_t stream);
 
 /**
  * @brief Executes the thrust device functions
  * @param d_costs Control input costs
  * @param samples Number of samples
  * @param temperature Distribution of exponential weighting for costs
+ * @param stream cudaStream association for the kernel launch
+ * @return minimum cost of control samples
  */
-void launchThrustWeighting(double *d_costs, int samples, float temperature);
+double launchThrustWeighting(double *d_costs, int samples, float temperature, cudaStream_t stream);
 
 /**
  * @brief Computes the weigthed optimal control input for each time step in the horizon
@@ -44,4 +47,4 @@ void launchThrustWeighting(double *d_costs, int samples, float temperature);
  * @param grid Size of grid
  * @param block Size of block
  */
-void launchAggregateControls(ControlInput *d_optimalControls, const ControlInput *d_sampleControls, const ControlInput *d_nominalControls, const double *d_weightedCosts, float alpha, int samples, int horizon, int grid, int block);
+void launchAggregateControls(ControlInput *d_optimalControls, const ControlInput *d_sampleControls, const ControlInput *d_nominalControls, const double *d_weightedCosts, float alpha, int samples, int horizon, int grid, int block, cudaStream_t stream);

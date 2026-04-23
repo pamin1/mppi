@@ -10,11 +10,11 @@ mppi_controller:
       alpha: 1.0
     
     cost_weights:
-      q_x: 2.0
-      q_y: 2.0
+      q_x: 1.0
+      q_y: 1.0
       q_heading: 0.0
-      q_vx: 1.0
-      q_vy: 1.0
+      q_vx: 0.5
+      q_vy: 0.5
       q_yaw_rate: 0.0
       r_accel: 0.0001
       r_steering: 0.01
@@ -56,7 +56,7 @@ bridge:
     opp_drive_topic: 'opp_drive'
 
     # map parameters
-    map_path: '/home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/simple_oval'
+    map_path: '/home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/simple_oval_obstacles'
     map_img_ext: '.png'
     
     # transform related

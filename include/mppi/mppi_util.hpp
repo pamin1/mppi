@@ -73,6 +73,7 @@ struct MPPIConfig
     float dt;
     float sigmaAcceleration;
     float sigmaSteering;
+    float steeringBias = 0;
 };
 
 __host__ __device__ inline VehicleState stepDynamics(VehicleState &state, const VehicleParams &params, const ControlInput &control, float dt)

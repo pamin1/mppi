@@ -34,15 +34,18 @@ class MPPI_Controller : public rclcpp::Node
     void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
 
     void updateControl();
-    void publishTopKPaths(const std::vector<double> &weights, const std::vector<ControlInput> &allControls);
-    void publishModes(const std::vector<Gaussian> &modes, const rclcpp::Time &stamp);
+    void publishModes(const std::vector<Gaussian> &modes, const rclcpp::Time &stamp, int best_mode);
+    void publishBestPath(int best_mode);
 
   private:
+    static constexpr int MAX_MODES = 4;
+
     // controller set up
     std::string mapFrame = "map";
     std::string baseFrame = "ego_racecar/base_link";
     double currentSteeringAngle = 0;
 
+    MPPIConfig config;
     int samples;
     int controlFrequency;
     float dt;
@@ -65,9 +68,9 @@ class MPPI_Controller : public rclcpp::Node
     // GPU arrays
     int block, grid;
 
-    MPPIConfig *d_mppi_config;
-
     ControlInput *d_optimalControls;
+    ControlInput *d_optimal_per_mode[MAX_MODES];
+
     ControlInput *d_nominalControls;
     VehicleState *d_refTraj;
     VehicleState *d_currState;
@@ -78,10 +81,15 @@ class MPPI_Controller : public rclcpp::Node
     curandState *d_rngStates;
 
     ControlInput *d_controls;
+    ControlInput *d_controls_per_mode[MAX_MODES];
     double *d_costs;
+    double *d_costs_per_mode[MAX_MODES];
 
     int8_t *d_costmap_data;
     CostmapInfo *d_costmap_info;
+
+    // create multiple cuda streams
+    cudaStream_t streams[MAX_MODES];
 
     // vehicle set up
     VehicleParams params;
@@ -91,6 +99,7 @@ class MPPI_Controller : public rclcpp::Node
     int costmap_size;
     size_t grid_size;
     std::vector<Gap> gaps;
+    std::vector<Gaussian> modes;
 
     // transforms
     std::shared_ptr<tf2_ros::Buffer> tfBuffer;
