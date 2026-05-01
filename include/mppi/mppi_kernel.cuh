@@ -3,6 +3,7 @@
 #include <curand_kernel.h>
 #include <device_launch_parameters.h>
 #include <mppi/mppi_util.hpp>
+#include <stdio.h>
 
 struct weightFunctor
 {
@@ -43,27 +44,35 @@ __device__ inline double angleDiff(double a, double b)
  * @param states Storage of device RNG seeds
  * @param seed Device seed
  */
-__global__ void setupRNG(curandState *states, unsigned long seed);
+__global__ void setupRNG(curandState* states, unsigned long seed);
 
 /**
  * @brief Checks for a collision against the Occupancy Grid map
  */
-__device__ bool checkCollision(const CostmapInfo &map, float x, float y)
+__device__ bool checkCollision(const CostmapInfo& map, float x, float y,
+    float rx, float ry, float rtheta)
 {
-    int gx = __float2int_rd((x + map.origin_offset) / map.resolution);
-    int gy = __float2int_rd((y + map.origin_offset) / map.resolution);
+    // transform map-frame point into base_link frame
+    float dx = x - rx;
+    float dy = y - ry;
+    float cos_t = cosf(-rtheta);
+    float sin_t = sinf(-rtheta);
+    float local_x = cos_t * dx - sin_t * dy;
+    float local_y = sin_t * dx + cos_t * dy;
+
+    int gx = __float2int_rd((local_x - map.origin_x) / map.resolution);
+    int gy = __float2int_rd((local_y - map.origin_y) / map.resolution);
 
     if (gx >= 0 && gx < map.width && gy >= 0 && gy < map.height)
     {
-        return map.data[gy * map.width + gx] > 0;
+        return static_cast<uint8_t>(map.data[gy * map.width + gx]) > 0;
     }
-    return true; // out of bounds = collision
+    return false;
 }
-
 /**
  * @brief Computes cost as error between current/predicted state and the reference state from optimized trajectory
  */
-__device__ __forceinline__ double computeCost(const VehicleState &predicted, const VehicleState &reference, const ControlInput &control, const CostWeights &weights, const CostmapInfo &map)
+__device__ __forceinline__ double computeCost(const VehicleState& predicted, const VehicleState& reference, const ControlInput& control, const CostWeights& weights, const CostmapInfo& map, float rx, float ry, float rtheta)
 {
     double cost = 0.0;
 
@@ -77,10 +86,10 @@ __device__ __forceinline__ double computeCost(const VehicleState &predicted, con
 
     cost += weights.rAccel * control.acceleration * control.acceleration + weights.rSteering * control.steering * control.steering;
 
-    if (checkCollision(map, predicted.x, predicted.y)) {
-        cost += 1e6;
+    if (checkCollision(map, predicted.x, predicted.y, rx, ry, rtheta)) {
+        cost += 1e3;
     }
-    
+
     return cost;
 }
 
@@ -97,7 +106,7 @@ __device__ __forceinline__ double computeCost(const VehicleState &predicted, con
  * @param params Vehicle model parameters
  * @param states cuRAND states for RNG
  */
-__global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig config, CostmapInfo *map, double *costs, const ControlInput *nominalControlSequence, const VehicleState *refTrajectory, const VehicleState *currState, const CostWeights *weights, const VehicleParams *params, curandState *states);
+__global__ void mppiKernel(ControlInput* controlSamples, MPPIConfig config, CostmapInfo* map, double* costs, const ControlInput* nominalControlSequence, const VehicleState* refTrajectory, const VehicleState* currState, const CostWeights* weights, const VehicleParams* params, curandState* states);
 
 /**
  * @brief Computes the weigthed optimal control input for each time step in the horizon
@@ -107,4 +116,4 @@ __global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig config, Cost
  * @param samples Number of path samples
  * @param horizon Length of horizon
  */
-__global__ void aggregateControls(ControlInput *optimalControls, const ControlInput *sampleControls, const ControlInput *nominalControls, const double *weightedCosts, float alpha, int samples, int horizon);
+__global__ void aggregateControls(ControlInput* optimalControls, const ControlInput* sampleControls, const ControlInput* nominalControls, const double* weightedCosts, float alpha, int samples, int horizon);

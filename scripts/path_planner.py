@@ -64,7 +64,7 @@ class GlobalTrajectoryPublisher(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Timer to periodically publish path
-        self.timer = self.create_timer(0.1, self.update_traj)
+        self.timer = self.create_timer(self.control_dt, self.update_traj)
 
     def odom_callback(self, msg):
         self.odom = msg

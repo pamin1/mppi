@@ -3,43 +3,46 @@ mppi_controller:
     mppi:
       samples: 10000
       control_frequency: 50
-      horizon: 30
+      horizon: 50
       accel_dist: 1.0
       steer_dist: 0.05
       temperature: 1.0
       alpha: 1.0
+      n_sigma: 4
     
     cost_weights:
       q_x: 1.0
       q_y: 1.0
       q_heading: 0.0
-      q_vx: 0.5
+      q_vx: 1.0
       q_vy: 0.5
       q_yaw_rate: 0.0
       r_accel: 0.0001
       r_steering: 0.01
       r_steering_rate: 0.01
 
+    visualization:
+      enable_viz: true
+      top_k_paths: 1
+      line_width: 0.05
+      path_alpha: 1.0
+
+local_map:
+  ros__parameters:
     local_map:
       size: 10.0
       resolution: 0.05
-      inflation_radius: 0.3
+      inflation_radius: 0.4
       lethal_cost: 100
       inscribed_cost: 99
-      decay_power: 2.0
-      publish_rate_hz: 20.0
+      decay_power: 0.02
+      publish_rate_hz: 60.0
     topics:
       scan: "/scan"
       odom: "/ego_racecar/odom"
       costmap: "/local_costmap"
     frames:
       costmap: "ego_racecar/base_link"
-
-    visualization:
-      enable_viz: true
-      top_k_paths: 1
-      line_width: 0.05
-      path_alpha: 1.0
 
 bridge:
   ros__parameters:

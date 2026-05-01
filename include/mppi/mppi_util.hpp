@@ -62,7 +62,8 @@ struct CostmapInfo
     int width;
     int height;
     float resolution;
-    float origin_offset;
+    float origin_x;
+    float origin_y;
     int8_t lethal_cost;
 };
 

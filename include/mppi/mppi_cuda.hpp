@@ -35,7 +35,7 @@ class MPPI_Controller : public rclcpp::Node
 
     void updateControl();
     void publishModes(const std::vector<Gaussian> &modes, const rclcpp::Time &stamp, int best_mode);
-    void publishBestPath(int best_mode);
+    void publishBestPaths(int best_mode, int num_modes, double *mode_min_costs);
 
   private:
     static constexpr int MAX_MODES = 4;
@@ -58,6 +58,7 @@ class MPPI_Controller : public rclcpp::Node
     std::vector<ControlInput> nominalControlSequence;
     std::vector<VehicleState> trajectory;
     float sigmaAcceleration, sigmaSteering; // control noise for sampling
+    int n_sigma;
 
     // visualization
     bool enableViz;

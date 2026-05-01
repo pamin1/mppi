@@ -97,6 +97,7 @@ void MPPI_Controller::loadParameters()
     // distribution tuning
     this->declare_parameter("mppi.accel_dist", 2.0);
     this->declare_parameter("mppi.steer_dist", 0.3);
+    this->declare_parameter("mppi.n_sigma", 3);
 
     // state tracking weights
     this->declare_parameter("cost_weights.q_x", 1.0);
@@ -128,6 +129,7 @@ void MPPI_Controller::loadParameters()
 
     sigmaAcceleration = this->get_parameter("mppi.accel_dist").as_double();
     sigmaSteering = this->get_parameter("mppi.steer_dist").as_double();
+    n_sigma = this->get_parameter("mppi.n_sigma").as_int();
 
     config.samples = samples;
     config.horizon = horizon;
@@ -210,6 +212,13 @@ void MPPI_Controller::loadParameters()
 
 void MPPI_Controller::updateState(const nav_msgs::msg::Odometry::SharedPtr odom)
 {
+    double odom_age_ms = (this->now() - odom->header.stamp).seconds() * 1000.0;
+    if (odom_age_ms > 2.0 * dt * 1000.0)
+    {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "Stale odom: %.1f ms old", odom_age_ms);
+    }
+
     geometry_msgs::msg::TransformStamped transform = tfBuffer->lookupTransform(mapFrame, baseFrame, rclcpp::Time());
     state.x = transform.transform.translation.x;
     state.y = transform.transform.translation.y;
@@ -231,6 +240,13 @@ void MPPI_Controller::updateState(const nav_msgs::msg::Odometry::SharedPtr odom)
 
 void MPPI_Controller::updateTraj(const autoware_auto_planning_msgs::msg::Trajectory::SharedPtr traj)
 {
+    double traj_age_ms = (this->now() - traj->header.stamp).seconds() * 1000.0;
+    if (traj_age_ms > 2.0 * dt * 1000.0)
+    {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "Stale trajectory: %.1f ms old", traj_age_ms);
+    }
+
     trajectory.clear();
     for (auto &point : traj->points) // need to guarantee that we only take sample number of trajectory points
     {
@@ -262,6 +278,15 @@ void MPPI_Controller::updateTraj(const autoware_auto_planning_msgs::msg::Traject
 
 void MPPI_Controller::updateMap(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
 {
+    double map_age_ms = (this->now() - map->header.stamp).seconds() * 1000.0;
+    if (map_age_ms > 2.0 * dt * 1000.0)
+    {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "Stale costmap: %.1f ms old", map_age_ms);
+    }
+
+    size_t incoming_size = map->info.width * map->info.height;
+
     // copy grid data to device
     cudaMemcpy(d_costmap_data, map->data.data(), grid_size * sizeof(int8_t), cudaMemcpyHostToDevice);
 
@@ -271,7 +296,8 @@ void MPPI_Controller::updateMap(const nav_msgs::msg::OccupancyGrid::SharedPtr ma
     costmap_info.height = map->info.height;
     costmap_info.width = map->info.width;
     costmap_info.resolution = map->info.resolution;
-    costmap_info.origin_offset = costmap_size / 2.0f;
+    costmap_info.origin_x = map->info.origin.position.x;
+    costmap_info.origin_y = map->info.origin.position.y;
     costmap_info.lethal_cost = 100;
 
     // copy struct to device
@@ -280,6 +306,12 @@ void MPPI_Controller::updateMap(const nav_msgs::msg::OccupancyGrid::SharedPtr ma
 
 void MPPI_Controller::updateScan(const sensor_msgs::msg::LaserScan::SharedPtr scan)
 {
+    double scan_age_ms = (this->now() - scan->header.stamp).seconds() * 1000.0;
+    if (scan_age_ms > 2.0 * dt * 1000.0)
+    {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "Stale scan: %.1f ms old", scan_age_ms);
+    }
     // laserscan gap finding
     float r_min = 3.0;
     gaps = findGaps(scan, r_min);
@@ -303,19 +335,25 @@ void MPPI_Controller::updateScan(const sensor_msgs::msg::LaserScan::SharedPtr sc
         int mid_idx = (gaps[i].start + gaps[i].end) / 2;
         double angle = scan->angle_min + mid_idx * scan->angle_increment;
 
-        RCLCPP_INFO(this->get_logger(), "Gap %d: start=%d, end=%d, angle=%f", i, gaps[i].start, gaps[i].end, angle);
-
         // angle = static_cast<float>(std::clamp(angle, -0.01, 0.01));
+        int gap_width = gaps[i].end - gaps[i].start;
+        float angular_width = gap_width * scan->angle_increment; // radians
+        float std_dev = angular_width / (2 * n_sigma);
 
         Gaussian mode;
         mode.mean = angle;
-        mode.std_dev = sigmaSteering; // can modify later
+        mode.std_dev = std_dev; // can modify later
         modes.push_back(mode);
+
+        // RCLCPP_INFO(this->get_logger(), "Gap %d: mean: %f, std_dev: %f", i, angle, std_dev);
     }
 }
 
 void MPPI_Controller::updateControl()
 {
+    // begin timing
+    auto start = std::chrono::high_resolution_clock::now();
+
     // safety check for data available
     if (!odom || !traj || !map || !scan)
     {
@@ -368,7 +406,7 @@ void MPPI_Controller::updateControl()
         mode_config.samples = samples_per_mode;
         mode_config.sigmaSteering = modes[m].std_dev;
         mode_config.steeringBias = modes[m].mean;
-        RCLCPP_INFO(this->get_logger(), "Angle: %.4f, Std Dev: %.4f", modes[m].mean, modes[m].std_dev);
+        // RCLCPP_INFO(this->get_logger(), "Angle: %.4f, Std Dev: %.4f", modes[m].mean, modes[m].std_dev);
 
         int mode_grid = (samples_per_mode + block - 1) / block;
 
@@ -394,26 +432,30 @@ void MPPI_Controller::updateControl()
     ControlInput control;
     cudaMemcpy(&control, d_optimal_per_mode[best], sizeof(ControlInput), cudaMemcpyDeviceToHost);
 
+    float speed = state.vx + control.acceleration * dt;
+
     // publish the control
     ackermann_msgs::msg::AckermannDriveStamped msg;
     msg.header.stamp = this->now();
     msg.header.frame_id = baseFrame;
-    msg.drive.speed = std::clamp(static_cast<float>(state.vx + control.acceleration * dt), -params.maxVelocity, params.maxVelocity);
+    msg.drive.speed = std::max(-params.maxVelocity, std::min(speed, params.maxVelocity));
     msg.drive.steering_angle = control.steering;
     controllerPub->publish(msg);
 
-    publishBestPath(best);
-    publishModes(modes, scan->header.stamp, best);
-
     // copy the optimal controls back to the nominal control input
     // shift left by 1, repeat last entry
-    cudaMemcpy(d_nominalControls, d_optimal_per_mode[best] + 1,
-               sizeof(ControlInput) * (horizon - 1), cudaMemcpyDeviceToDevice);
-    cudaMemcpy(d_nominalControls + (horizon - 1), d_optimal_per_mode[best] + (horizon - 1),
-               sizeof(ControlInput), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_nominalControls, d_optimal_per_mode[best] + 1, sizeof(ControlInput) * (horizon - 1), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_nominalControls + (horizon - 1), d_optimal_per_mode[best] + (horizon - 1), sizeof(ControlInput), cudaMemcpyDeviceToDevice);
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(end - start).count();
+    RCLCPP_INFO(this->get_logger(), "MPPI solve: %.2f ms (%.1f Hz capable)", ms, 1000.0 / ms);
+
+    publishBestPaths(best, num_modes, mode_min_costs);
+    publishModes(modes, scan->header.stamp, best);
 }
 
-void MPPI_Controller::publishBestPath(int best_mode)
+void MPPI_Controller::publishBestPaths(int best_mode, int num_modes, double *mode_min_costs)
 {
     visualization_msgs::msg::MarkerArray markerArray;
 
@@ -421,42 +463,100 @@ void MPPI_Controller::publishBestPath(int best_mode)
     deleteAll.action = visualization_msgs::msg::Marker::DELETEALL;
     markerArray.markers.push_back(deleteAll);
 
-    // copy the winning mode's full optimal sequence to host
+    // find worst mode
+    int worst_mode = 0;
+    for (int m = 1; m < num_modes; m++)
+    {
+        if (mode_min_costs[m] > mode_min_costs[worst_mode])
+            worst_mode = m;
+    }
+
+    // copy both control sequences to host
     std::vector<ControlInput> bestControls(horizon);
+    std::vector<ControlInput> worstControls(horizon);
     cudaMemcpy(bestControls.data(), d_optimal_per_mode[best_mode],
                sizeof(ControlInput) * horizon, cudaMemcpyDeviceToHost);
+    cudaMemcpy(worstControls.data(), d_optimal_per_mode[worst_mode],
+               sizeof(ControlInput) * horizon, cudaMemcpyDeviceToHost);
 
-    visualization_msgs::msg::Marker marker;
-    marker.header.stamp = this->now();
-    marker.header.frame_id = mapFrame;
-    marker.ns = "mppi_best_path";
-    marker.id = 0;
-    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-    marker.action = visualization_msgs::msg::Marker::ADD;
-    marker.scale.x = vizLineWidth;
-    marker.pose.orientation.w = 1.0;
-    marker.color.r = 0.0f;
-    marker.color.g = 1.0f;
-    marker.color.b = 0.0f;
-    marker.color.a = vizPathAlpha;
-
-    VehicleState simState = state;
-    geometry_msgs::msg::Point pt;
-    pt.x = simState.x;
-    pt.y = simState.y;
-    pt.z = 0.0;
-    marker.points.push_back(pt);
-
-    for (int t = 0; t < horizon; ++t)
+    struct PathViz
     {
-        simState = stepDynamics(simState, params, bestControls[t], dt);
+        std::string ns;
+        int id_line;
+        int id_label;
+        std::vector<ControlInput> &controls;
+        float r, g, b;
+        double cost;
+        std::string label_prefix;
+    };
+
+    std::vector<PathViz> paths = {
+        {"mppi_best_path", 0, 1, bestControls, 0.0f, 1.0f, 0.0f,
+         mode_min_costs[best_mode], "BEST (mode " + std::to_string(best_mode) + ")"},
+        {"mppi_worst_path", 2, 3, worstControls, 1.0f, 0.0f, 0.0f,
+         mode_min_costs[worst_mode], "WORST (mode " + std::to_string(worst_mode) + ")"},
+    };
+
+    for (auto &p : paths)
+    {
+        // line strip
+        visualization_msgs::msg::Marker line;
+        line.header.stamp = this->now();
+        line.header.frame_id = mapFrame;
+        line.ns = p.ns;
+        line.id = p.id_line;
+        line.type = visualization_msgs::msg::Marker::LINE_STRIP;
+        line.action = visualization_msgs::msg::Marker::ADD;
+        line.scale.x = vizLineWidth;
+        line.pose.orientation.w = 1.0;
+        line.color.r = p.r;
+        line.color.g = p.g;
+        line.color.b = p.b;
+        line.color.a = vizPathAlpha;
+
+        VehicleState simState = state;
+        geometry_msgs::msg::Point pt;
         pt.x = simState.x;
         pt.y = simState.y;
         pt.z = 0.0;
-        marker.points.push_back(pt);
+        line.points.push_back(pt);
+
+        for (int t = 0; t < horizon; ++t)
+        {
+            simState = stepDynamics(simState, params, p.controls[t], dt);
+            pt.x = simState.x;
+            pt.y = simState.y;
+            pt.z = 0.0;
+            line.points.push_back(pt);
+        }
+
+        markerArray.markers.push_back(line);
+
+        // cost label at the end of the path
+        visualization_msgs::msg::Marker label;
+        label.header.stamp = this->now();
+        label.header.frame_id = mapFrame;
+        label.ns = p.ns;
+        label.id = p.id_label;
+        label.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+        label.action = visualization_msgs::msg::Marker::ADD;
+        label.pose.position.x = simState.x;
+        label.pose.position.y = simState.y;
+        label.pose.position.z = 0.5;
+        label.pose.orientation.w = 1.0;
+        label.scale.z = 0.3;
+        label.color.r = p.r;
+        label.color.g = p.g;
+        label.color.b = p.b;
+        label.color.a = 1.0f;
+
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(2) << "cost: " << p.cost;
+        label.text = oss.str();
+
+        markerArray.markers.push_back(label);
     }
 
-    markerArray.markers.push_back(marker);
     vizPub->publish(markerArray);
 }
 
@@ -522,9 +622,7 @@ void MPPI_Controller::publishModes(const std::vector<Gaussian> &modes, const rcl
         m.points.push_back(start);
         m.points.push_back(end);
 
-        m.scale.x = 0.05;
-        m.scale.y = 0.10;
-        m.scale.z = 0.08;
+        m.scale.x = m.scale.y = m.scale.z = points[i].score;
 
         if (static_cast<int>(i) == best_mode)
         {
@@ -538,7 +636,7 @@ void MPPI_Controller::publishModes(const std::vector<Gaussian> &modes, const rcl
             m.color.g = 0.0;
             m.color.b = 0.0;
         }
-        m.color.a = 0.9;
+        m.color.a = 1.0;
 
         m.lifetime.sec = 0;
         m.lifetime.nanosec = 100000000; // 0.1s

@@ -98,6 +98,7 @@ class LocalCostmapNode(Node):
 
     # Costmap generation
     def _publish_costmap(self):
+        
         if self.latest_scan is None:
             return
 

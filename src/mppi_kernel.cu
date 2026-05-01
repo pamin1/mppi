@@ -28,11 +28,11 @@ __global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig config, Cost
     ControlInput controls[30];
     for (int t = 0; t < config.horizon; ++t)
     {
-        float accelNoise = curand_normal(&localState) * config.sigmaAcceleration;
-        float steerNoise = curand_normal(&localState) * config.sigmaSteering;
+        float accelSample = nominalControlSequence[t].acceleration + (curand_normal(&localState) * config.sigmaAcceleration);
+        float steerSample = config.steeringBias + (curand_normal(&localState) * config.sigmaSteering);
 
-        controls[t].acceleration = nominalControlSequence[t].acceleration + accelNoise;
-        controls[t].steering = config.steeringBias + steerNoise;
+        controls[t].acceleration = accelSample;
+        controls[t].steering = steerSample;
 
         controls[t].acceleration = clamp(controls[t].acceleration, params->minAcceleration, params->maxAcceleration);
         controls[t].steering = clamp(controls[t].steering, params->minSteeringAngle, params->maxSteeringAngle);
@@ -41,6 +41,10 @@ __global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig config, Cost
         controlSamples[k * config.horizon + t] = controls[t];
     }
 
+    float rx = currState->x;
+    float ry = currState->y;
+    float rtheta = currState->heading;
+
     VehicleState rollingState = *currState;
     VehicleParams p = *params;
     CostWeights w = *weights;
@@ -48,7 +52,8 @@ __global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig config, Cost
     for (int i = 0; i < config.horizon; i++)
     {
         rollingState = stepDynamics(rollingState, p, controls[i], config.dt);
-        cost += computeCost(rollingState, refTrajectory[i], controls[i], w, *map);
+        cost += computeCost(rollingState, refTrajectory[i], controls[i], w, *map, rx, ry, rtheta);
+
 
         if (i > 0)
         {
