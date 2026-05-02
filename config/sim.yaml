@@ -59,7 +59,9 @@ bridge:
     opp_drive_topic: 'opp_drive'
 
     # map parameters
-    map_path: '/home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/simple_oval_obstacles'
+    # map_path: '/home/prachit/Projects/racing/sim/src/f1tenth_gym_ros/maps/simple_oval_obstacles'
+    map_path: '/workspace/src/f1tenth_gym_ros/maps/simple_oval_obstacles'
+    # map_path: '/workspace/src/f1tenth_gym_ros/maps/simple_oval'
     map_img_ext: '.png'
     
     # transform related

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cuda_runtime.h>
+#include <stdint.h>
 #include <vector>
 
 // parameterize vehicle state

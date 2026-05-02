@@ -28,8 +28,8 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(CUDAToolkit REQUIRED)
-find_package(Thrust REQUIRED CONFIG)
-thrust_create_target(Thrust)
+# find_package(Thrust REQUIRED CONFIG)
+# thrust_create_target(Thrust)
 
 ament_python_install_package(${PROJECT_NAME})
 add_library(mppi_kernels
@@ -51,17 +51,28 @@ target_compile_options(mppi_kernels PRIVATE
 target_link_libraries(mppi_kernels
   CUDA::cudart
   CUDA::curand
-  Thrust
+  # Thrust
 )
 
 add_executable(mppi_controller_node 
-  src/mppi_cuda.cpp
+  src/mppi_cuda.cu
+)
+
+target_compile_options(mppi_controller_node PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:
+    --expt-relaxed-constexpr
+    -ccbin=/usr/bin/g++-10
+  >
 )
 
 target_include_directories(mppi_controller_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${EIGEN3_INCLUDE_DIRS}
+  /opt/ros/humble/include
+  /opt/ros/humble/include/tf2
+  /opt/ros/humble/include/tf2_ros
+  /opt/ros/humble/include/tf2_geometry_msgs
 )
 
 ament_target_dependencies(mppi_controller_node
