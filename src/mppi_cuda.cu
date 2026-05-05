@@ -312,6 +312,16 @@ void MPPI_Controller::updateScan(const sensor_msgs::msg::LaserScan::SharedPtr sc
         RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                              "Stale scan: %.1f ms old", scan_age_ms);
     }
+
+    int near_zero_count = 0;
+    for (const auto& r : scan->ranges) {
+        if (r < 0.05f) near_zero_count++;
+    }
+    if (near_zero_count > static_cast<int>(scan->ranges.size()) / 2) {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 500, "Degenerate scan — skipping gap update");
+        return;  // keep previous gaps/modes
+    }
+
     // laserscan gap finding
     float r_min = 3.0;
     gaps = findGaps(scan, r_min);
@@ -338,7 +348,12 @@ void MPPI_Controller::updateScan(const sensor_msgs::msg::LaserScan::SharedPtr sc
         // angle = static_cast<float>(std::clamp(angle, -0.01, 0.01));
         int gap_width = gaps[i].end - gaps[i].start;
         float angular_width = gap_width * scan->angle_increment; // radians
+        
+        // Skip degenerate gaps
+        if (gap_width < 5 || angular_width < 0.05f) continue;
+
         float std_dev = angular_width / (2 * n_sigma);
+        std_dev = std::max(std_dev, 0.01f);  // hard floor
 
         Gaussian mode;
         mode.mean = angle;
@@ -394,7 +409,22 @@ void MPPI_Controller::updateControl()
 
     int agg_block = 32;
     int agg_grid = (horizon + agg_block - 1) / agg_block;
+    
     int num_modes = std::min(static_cast<int>(modes.size()), MAX_MODES);
+    
+    if (num_modes == 0)
+    {
+        // No gaps found — publish zero command and bail
+        ackermann_msgs::msg::AckermannDriveStamped msg;
+        msg.header.stamp = this->now();
+        msg.header.frame_id = baseFrame;
+        msg.drive.speed = 0.0;
+        msg.drive.steering_angle = 0.0;
+        controllerPub->publish(msg);
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 500, "No gaps found — skipping MPPI solve");
+        return;
+    }
+
     int samples_per_mode = samples / num_modes;
     double mode_min_costs[MAX_MODES];
 
@@ -449,7 +479,7 @@ void MPPI_Controller::updateControl()
     
     auto end = std::chrono::high_resolution_clock::now();
     double ms = std::chrono::duration<double, std::milli>(end - start).count();
-    RCLCPP_INFO(this->get_logger(), "MPPI solve: %.2f ms (%.1f Hz capable)", ms, 1000.0 / ms);
+    // RCLCPP_INFO(this->get_logger(), "MPPI solve: %.2f ms (%.1f Hz capable)", ms, 1000.0 / ms);
 
     publishBestPaths(best, num_modes, mode_min_costs);
     publishModes(modes, scan->header.stamp, best);

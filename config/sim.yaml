@@ -1,7 +1,7 @@
 mppi_controller:
   ros__parameters:
     mppi:
-      samples: 10000
+      samples: 1000
       control_frequency: 50
       horizon: 50
       accel_dist: 1.0
