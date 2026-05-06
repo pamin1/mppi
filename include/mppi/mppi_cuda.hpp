@@ -86,7 +86,6 @@ class MPPI_Controller : public rclcpp::Node
 
     int costmap_size;
     size_t grid_size;
-    std::vector<Gap> gaps;
 
     // transforms
     std::shared_ptr<tf2_ros::Buffer> tfBuffer;
