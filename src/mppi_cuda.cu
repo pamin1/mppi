@@ -414,14 +414,39 @@ void MPPI_Controller::updateControl()
     
     if (num_modes == 0)
     {
-        // No gaps found — publish zero command and bail
+        // Fallback: single unimodal rollout centered on zero steering
+        MPPIConfig fallback_config = config;
+        fallback_config.samples = samples;
+        fallback_config.sigmaSteering = sigmaSteering;
+        fallback_config.steeringBias = 0.0;
+
+        int fallback_grid = (samples + block - 1) / block;
+
+        launchMPPIKernel(d_controls, fallback_config, d_costmap_info, d_costs, d_nominalControls, d_refTraj, d_currState, d_weights, d_params, d_rngStates, fallback_grid, block, streams[0]);
+
+        launchThrustWeighting(d_costs, samples, temperature, streams[0]);
+
+        launchAggregateControls(d_optimal_per_mode[0], d_controls, d_nominalControls, d_costs, alpha, samples, horizon, agg_grid, agg_block, streams[0]);
+
+        cudaStreamSynchronize(streams[0]);
+
+        ControlInput control;
+        cudaMemcpy(&control, d_optimal_per_mode[0], sizeof(ControlInput), cudaMemcpyDeviceToHost);
+
+        float speed = state.vx + control.acceleration * dt;
+
         ackermann_msgs::msg::AckermannDriveStamped msg;
         msg.header.stamp = this->now();
         msg.header.frame_id = baseFrame;
-        msg.drive.speed = 0.0;
-        msg.drive.steering_angle = 0.0;
+        msg.drive.speed = std::max(-params.maxVelocity, std::min(speed, params.maxVelocity));
+        msg.drive.steering_angle = control.steering;
         controllerPub->publish(msg);
-        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 500, "No gaps found — skipping MPPI solve");
+
+        // Warm-start: shift nominal sequence left by 1
+        cudaMemcpy(d_nominalControls, d_optimal_per_mode[0] + 1, sizeof(ControlInput) * (horizon - 1), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(d_nominalControls + (horizon - 1), d_optimal_per_mode[0] + (horizon - 1), sizeof(ControlInput), cudaMemcpyDeviceToDevice);
+
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 500, "No gaps — unimodal fallback");
         return;
     }
 
