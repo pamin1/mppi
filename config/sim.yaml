@@ -71,7 +71,6 @@ bridge:
     scan_fov: 4.7
     scan_beams: 1080
 
-
     # opponent parameters
     num_agent: 1
 

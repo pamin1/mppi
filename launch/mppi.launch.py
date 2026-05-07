@@ -76,6 +76,14 @@ def generate_launch_description():
         parameters=[params_file],
     )
 
+    lap_logger = Node(
+        package="mppi",
+        executable="lap_logger.py",
+        name="bridge",
+        output="screen",
+        parameters=[params_file]
+    )
+
     f1tenth_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(f1tenth_pkg, "launch", "gym_bridge_launch.py")
@@ -94,19 +102,8 @@ def generate_launch_description():
     ld.add_action(path_planner)
     ld.add_action(local_map)
     ld.add_action(mppi_controller)
+    ld.add_action(lap_logger)
     ld.add_action(f1tenth_sim)
     ld.add_action(bag)
 
     return ld
-    # return LaunchDescription([
-    #     map_arg,
-    #     path_planner,
-    #     local_map,
-    #     mppi_controller,
-    #     f1tenth_sim,
-
-    #     ExecuteProcess(
-    #         cmd=['ros2', 'bag', 'record', '-a', '-o', bag_directory],
-    #         output='screen'
-    #     )
-    # ])
