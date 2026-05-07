@@ -101,6 +101,8 @@ install(DIRECTORY include/
 
 install(PROGRAMS
   scripts/path_planner.py
+  scripts/local_map.py
+  scripts/lap_logger.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

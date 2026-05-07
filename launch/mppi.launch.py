@@ -62,6 +62,14 @@ def generate_launch_description():
         parameters=[params_file],
     )
 
+    lap_logger = Node(
+        package="mppi",
+        executable="lap_logger.py",
+        name="bridge",
+        output="screen",
+        parameters=[params_file]
+    )
+
     f1tenth_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(f1tenth_pkg, "launch", "gym_bridge_launch.py")
@@ -72,6 +80,8 @@ def generate_launch_description():
     return LaunchDescription([
         map_arg,
         path_planner,
+        local_map,
         mppi_controller,
+        lap_logger,
         f1tenth_sim,
     ])
