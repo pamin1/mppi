@@ -46,6 +46,9 @@ local_map:
 
 bridge:
   ros__parameters:
+    target_laps: 1
+    output_file: /workspace/lap_test.csv
+
     # topics and namespaces
     ego_namespace: 'ego_racecar'
     ego_scan_topic: 'scan'
