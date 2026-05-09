@@ -156,15 +156,8 @@ def render_track(
     inner_px = world_to_pixel(inner)
 
     # Fill track area by drawing a filled polygon for each quad segment
-    for i in range(len(centerline)):
-        j = (i + 1) % len(centerline)
-        quad = np.array([
-            outer_px[i],
-            outer_px[j],
-            inner_px[j],
-            inner_px[i],
-        ], dtype=np.int32)
-        cv2.fillConvexPoly(img, quad, 255)
+    track_polygon = np.vstack([outer_px, inner_px[::-1]]).reshape(1, -1, 2)
+    cv2.fillPoly(img, track_polygon, 255)
 
     # Draw walls (black = occupied)
     outer_px_draw = outer_px.reshape(-1, 1, 2)

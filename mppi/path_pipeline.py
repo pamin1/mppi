@@ -2,7 +2,7 @@ import os
 import sys
 import pathlib
 from baseline_generation import generate_baseline, read_yaml
-from raceline_optimizer import optimize_baseline
+from raceline_optimizer import optimize_baseline, optimize_raceline
 
 cwd = os.getcwd()    
 input_path = f"{cwd}/src/f1tenth_gym_ros/maps"
@@ -17,7 +17,7 @@ def main():
 
     src = dst
     dst = f"{output_path}/{fn}_optimized.csv"
-    optimize_baseline(src, dst)
+    optimize_raceline(src, dst)
 
 if __name__ == '__main__':
     main()
