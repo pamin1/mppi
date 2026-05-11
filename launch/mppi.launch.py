@@ -8,17 +8,23 @@ Usage:
 """
 
 import os
-
+from datetime import datetime
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, ExecuteProcess
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
+    ld = LaunchDescription()
+
+    timestamp = datetime.now().strftime('%Y_%m_%d-%H_%M_%S')
+    bag_directory = os.path.join('bags', f'record_{timestamp}')
+    
     mppi_pkg = get_package_share_directory("mppi")
     f1tenth_pkg = get_package_share_directory("f1tenth_gym_ros")
 
@@ -28,6 +34,11 @@ def generate_launch_description():
     map_arg = DeclareLaunchArgument(
         "map", default_value="Spielberg_map",
         description="Map name (without extension)",
+    )
+
+    bagging = DeclareLaunchArgument(
+        "bag", default_value="False",
+        description="Write ros bags"
     )
 
     # --- Derived substitutions ---
@@ -43,7 +54,10 @@ def generate_launch_description():
         executable="path_planner.py",
         name="path_planner",
         output="screen",
-        parameters=[{"trajectory_path": trajectory_path}],
+        parameters=[{
+            "trajectory_path": trajectory_path,
+            "control_dt": 1 / 60.0
+            }],
     )
 
     local_map = Node(
@@ -77,11 +91,19 @@ def generate_launch_description():
         launch_arguments={"params_file": params_file}.items(),
     )
 
-    return LaunchDescription([
-        map_arg,
-        path_planner,
-        local_map,
-        mppi_controller,
-        lap_logger,
-        f1tenth_sim,
-    ])
+    bag = ExecuteProcess(
+            cmd=['ros2', 'bag', 'record', '-a', '-o', bag_directory],
+            output='screen',
+            condition=IfCondition(LaunchConfiguration("bag"))
+        )
+
+    ld.add_action(map_arg)
+    ld.add_action(bagging)
+    ld.add_action(path_planner)
+    ld.add_action(local_map)
+    ld.add_action(mppi_controller)
+    ld.add_action(lap_logger)
+    ld.add_action(f1tenth_sim)
+    ld.add_action(bag)
+
+    return ld
