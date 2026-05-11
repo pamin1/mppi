@@ -41,6 +41,10 @@ __global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, Cos
         controlSamples[k * config->horizon + t] = controls[t];
     }
 
+    float rx = currState->x;
+    float ry = currState->y;
+    float rtheta = currState->heading;
+
     VehicleState rollingState = *currState;
     VehicleParams p = *params;
     CostWeights w = *weights;
@@ -48,7 +52,7 @@ __global__ void mppiKernel(ControlInput *controlSamples, MPPIConfig *config, Cos
     for (int i = 0; i < config->horizon; i++)
     {
         rollingState = stepDynamics(rollingState, p, controls[i], config->dt);
-        cost += computeCost(rollingState, refTrajectory[i], controls[i], w, *map);
+        cost += computeCost(rollingState, refTrajectory[i], controls[i], w, *map, rx, ry, rtheta);
 
         if (i > 0)
         {

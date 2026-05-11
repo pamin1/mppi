@@ -48,22 +48,29 @@ __global__ void setupRNG(curandState *states, unsigned long seed);
 /**
  * @brief Checks for a collision against the Occupancy Grid map
  */
-__device__ bool checkCollision(const CostmapInfo &map, float x, float y)
+__device__ bool checkCollision(const CostmapInfo &map, float x, float y, float rx, float ry, float rtheta)
 {
-    int gx = __float2int_rd((x + map.origin_offset) / map.resolution);
-    int gy = __float2int_rd((y + map.origin_offset) / map.resolution);
+    float dx = x - rx;
+    float dy = y - ry;
+    float cos_t = cosf(-rtheta);
+    float sin_t = sinf(-rtheta);
+    float local_x = cos_t * dx - sin_t * dy;
+    float local_y = sin_t * dx + cos_t * dy;
+
+    int gx = __float2int_rd((local_x + map.origin_offset) / map.resolution);
+    int gy = __float2int_rd((local_y + map.origin_offset) / map.resolution);
 
     if (gx >= 0 && gx < map.width && gy >= 0 && gy < map.height)
     {
-        return map.data[gy * map.width + gx] >= 128;
+        return static_cast<uint8_t>(map.data[gy * map.width + gx] > 0);
     }
-    return true; // out of bounds = collision
+    return false; // out of bounds = collision
 }
 
 /**
  * @brief Computes cost as error between current/predicted state and the reference state from optimized trajectory
  */
-__device__ __forceinline__ double computeCost(const VehicleState &predicted, const VehicleState &reference, const ControlInput &control, const CostWeights &weights, const CostmapInfo &map)
+__device__ __forceinline__ double computeCost(const VehicleState &predicted, const VehicleState &reference, const ControlInput &control, const CostWeights &weights, const CostmapInfo &map, float rx, float ry, float rtheta)
 {
     double cost = 0.0;
 
@@ -77,7 +84,7 @@ __device__ __forceinline__ double computeCost(const VehicleState &predicted, con
 
     cost += weights.rAccel * control.acceleration * control.acceleration + weights.rSteering * control.steering * control.steering;
 
-    if (checkCollision(map, predicted.x, predicted.y)) {
+    if (checkCollision(map, predicted.x, predicted.y, rx, ry, rtheta)) {
         cost += 1e6;
     }
     
