@@ -4,6 +4,7 @@ import math
 import os
 import signal
 import csv
+import datetime
 
 import rclpy
 from rclpy.node import Node
@@ -19,14 +20,14 @@ class LapLogger(Node):
         self.declare_parameter('sy', 0.0)
         self.declare_parameter('stheta', 0.0)
         self.declare_parameter('target_laps', 3)
-        self.declare_parameter('output_file', '/workspace/lap_results.csv')
+        
 
         self.sx = self.get_parameter('sx').value
         self.sy = self.get_parameter('sy').value
         self.stheta = self.get_parameter('stheta').value
         self.stheta_rad = math.radians(self.stheta)
-        self.target_laps = self.get_parameter('target_laps').value
-        self.output_file = self.get_parameter('output_file').value
+        self.target_laps = 1 + self.get_parameter('target_laps').value
+        self.output_file = os.path.join(os.getcwd(), "data", "test_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + ".csv")
 
         # Lap tracking
         self.near_start = True
@@ -125,13 +126,14 @@ class LapLogger(Node):
                 f'Lap {self.lap_count} — {lap_time:.2f}s, '
                 f'{self.lap_collisions} collisions')
 
-            self.lap_results.append({
-                'lap': self.lap_count,
-                'time': round(lap_time, 2),
-                'collisions': self.lap_collisions,
-                'avg_speed': round(self.total_speed / max(self.total_msgs, 1), 2),
-                'distance': round(self.lap_distance, 2),
-            })
+            if self.lap_count > 1:
+                self.lap_results.append({
+                    'lap': self.lap_count,
+                    'time': round(lap_time, 2),
+                    'collisions': self.lap_collisions,
+                    'avg_speed': round(self.total_speed / max(self.total_msgs, 1), 2),
+                    'distance': round(self.lap_distance, 2),
+                })
 
             # Reset per-lap counters
             self.lap_start_time = now
@@ -149,8 +151,6 @@ class LapLogger(Node):
                 self.get_logger().info(
                     f'Target {self.target_laps} laps reached — shutting down')
                 os.killpg(os.getpgid(os.getpid()), signal.SIGTERM)
-
-            # self.write_results()
 
 
     def write_results(self):
