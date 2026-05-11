@@ -125,13 +125,14 @@ class LapLogger(Node):
                 f'Lap {self.lap_count} — {lap_time:.2f}s, '
                 f'{self.lap_collisions} collisions')
 
-            self.lap_results.append({
-                'lap': self.lap_count,
-                'time': round(lap_time, 2),
-                'collisions': self.lap_collisions,
-                'avg_speed': round(self.total_speed / max(self.total_msgs, 1), 2),
-                'distance': round(self.lap_distance, 2),
-            })
+            if self.lap_count > 1:
+                self.lap_results.append({
+                    'lap': self.lap_count - 1,
+                    'time': round(lap_time, 2),
+                    'collisions': self.lap_collisions,
+                    'avg_speed': round(self.total_speed / max(self.total_msgs, 1), 2),
+                    'distance': round(self.lap_distance, 2),
+                })
 
             # Reset per-lap counters
             self.lap_start_time = now
