@@ -22,7 +22,7 @@ def generate_launch_description():
     mppi_pkg = get_package_share_directory("mppi")
     f1tenth_pkg = get_package_share_directory("f1tenth_gym_ros")
 
-    params_file = os.path.join(mppi_pkg, "config", "testing_env.yaml")
+    params_file = os.path.join(mppi_pkg, "config", "sim.yaml")
 
     # --- Arguments ---
     map_arg = DeclareLaunchArgument(

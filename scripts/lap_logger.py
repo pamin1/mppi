@@ -128,7 +128,7 @@ class LapLogger(Node):
 
             if self.lap_count > 1:
                 self.lap_results.append({
-                    'lap': self.lap_count,
+                    'lap': self.lap_count - 1,
                     'time': round(lap_time, 2),
                     'collisions': self.lap_collisions,
                     'avg_speed': round(self.total_speed / max(self.total_msgs, 1), 2),
